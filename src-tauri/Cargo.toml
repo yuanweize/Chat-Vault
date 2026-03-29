@@ -3,6 +3,7 @@ name = "gemini-collector"
 version = "0.1.0"
 description = "A Tauri App"
 authors = ["you"]
+license = "LicenseRef-PolyForm-Noncommercial-1.0.0"
 edition = "2021"
 default-run = "gemini-collector"
 

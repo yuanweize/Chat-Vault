@@ -98,3 +98,9 @@ Native desktop app for macOS & Windows · Multi-account · Light / Dark theme
 **Windows**
 - Windows 10 (1803+) or later
 - Sign in to Google within the app on first use (Chrome not required)
+
+---
+
+## License
+
+[PolyForm Noncommercial License 1.0.0](./LICENSE) — free to use, modify, and share for non-commercial purposes.

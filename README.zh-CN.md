@@ -98,3 +98,9 @@ macOS & Windows 原生应用 · 支持多账号 · 亮色 / 暗色主题
 **Windows**
 - Windows 10 (1803+) 及以上
 - 首次使用时需在 App 内登录 Google 账号（无需安装 Chrome）
+
+---
+
+## 许可证
+
+[PolyForm Noncommercial License 1.0.0](./LICENSE) — 免费用于非商业目的，可自由使用、修改和分发。
