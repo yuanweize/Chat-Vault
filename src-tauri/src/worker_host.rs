@@ -18,6 +18,8 @@ use tauri::{AppHandle, Emitter};
 use tokio::sync::Mutex;
 
 use crate::cookies;
+use crate::protocol;
+use crate::search;
 use crate::str_err::ToStringErr;
 use crate::sync::CancellationToken;
 use crate::gemini_api::GeminiExporter;
@@ -361,7 +363,7 @@ impl WorkerHost {
         let output_dir = self.output_dir.clone();
         let account_id = ctx.account_id.clone();
 
-        self.run_with_retry(&account_id, |exporter| {
+        let result = self.run_with_retry(&account_id, |exporter| {
             let output_dir = output_dir.clone();
             let cancel = cancel.clone();
             let cid = conversation_id.clone();
@@ -372,7 +374,13 @@ impl WorkerHost {
                 Ok(json!({ "conversationId": cid }))
             }
         })
-        .await
+        .await?;
+
+        // 同步成功后更新搜索索引
+        let account_dir = self.output_dir.join("accounts").join(&account_id);
+        index_single_conversation(&account_dir, &conversation_id);
+
+        Ok(result)
     }
 
     async fn execute_sync_full(
@@ -560,6 +568,14 @@ impl WorkerHost {
                 phase, idx + 1, total, succeeded.len(), failed.len(), cid,
                 t_conv.elapsed().as_millis()
             );
+        }
+
+        // batch 结束后合并索引 segment
+        let account_dir = self.output_dir.join("accounts").join(&parent_ctx.account_id);
+        if !succeeded.is_empty() {
+            if let Ok(index) = search::open_or_create_index(&account_dir) {
+                let _ = search::merge_segments(&index);
+            }
         }
 
         Ok(BatchResult { succeeded, failed })
@@ -905,4 +921,21 @@ fn collect_empty_conversation_ids(items: &[Value]) -> Vec<String> {
                 .map(|s| s.to_string())
         })
         .collect()
+}
+
+/// 对单个会话执行搜索索引更新（同步成功后调用）
+fn index_single_conversation(account_dir: &Path, conversation_id: &str) {
+    let bare_id = protocol::strip_c_prefix(conversation_id);
+    let jsonl_path = account_dir.join("conversations").join(format!("{}.jsonl", bare_id));
+    if !jsonl_path.exists() {
+        return;
+    }
+    match search::open_or_create_index(account_dir) {
+        Ok(index) => {
+            if let Err(e) = search::index_conversation(&index, account_dir, &bare_id, &jsonl_path) {
+                log::warn!("索引更新失败 (conv={}): {}", bare_id, e);
+            }
+        }
+        Err(e) => log::warn!("打开搜索索引失败: {}", e),
+    }
 }
