@@ -59,7 +59,7 @@ export function TopBar({
         onClick={onToggleSidebar}
         title={sidebarCollapsed ? "展开侧边栏" : "收起侧边栏"}
         style={{
-          ...iconBtn(t.btnHoverBg),
+          ...iconBtn(),
           marginLeft: sidebarCollapsed ? 68 : 0,
           transition: "background 0.15s, margin-left 0.25s cubic-bezier(0.4,0,0.2,1)",
         }}
@@ -120,7 +120,7 @@ export function TopBar({
           <button
             onClick={() => onClearConversation?.()}
             title="清除当前对话内容"
-            style={iconBtn(t.btnHoverBg)}
+            style={iconBtn()}
             {...hoverHandlers(t.btnHoverBg)}
           >
             <TrashIcon color={t.textSub} />
@@ -135,7 +135,7 @@ export function TopBar({
               void openUrl(`https://gemini.google.com/u/${au}/app/${bareId}`);
             }}
             title="在浏览器中打开"
-            style={iconBtn(t.btnHoverBg)}
+            style={iconBtn()}
             {...hoverHandlers(t.btnHoverBg)}
           >
             <ExternalLinkIcon color={t.textSub} />
@@ -145,7 +145,7 @@ export function TopBar({
         <button
           onClick={onToggleDark}
           title={isDark ? "切换到亮色模式" : "切换到暗色模式"}
-          style={iconBtn(t.btnHoverBg)}
+          style={iconBtn()}
           {...hoverHandlers(t.btnHoverBg)}
         >
           {isDark ? <SunIcon color={t.textSub} /> : <MoonIcon color={t.textSub} />}
@@ -158,12 +158,8 @@ export function TopBar({
             onLogout();
           }}
           title="退出账号"
-          style={{ ...iconBtn(t.btnHoverBg), opacity: disableLogout ? 0.55 : 1, cursor: disableLogout ? "default" : "pointer" }}
-          onMouseEnter={(e) => {
-            if (disableLogout) return;
-            (e.currentTarget as HTMLElement).style.background = t.btnHoverBg;
-          }}
-          onMouseLeave={(e) => ((e.currentTarget as HTMLElement).style.background = "transparent")}
+          style={{ ...iconBtn(), opacity: disableLogout ? 0.55 : 1, cursor: disableLogout ? "default" : "pointer" }}
+          {...(!disableLogout ? hoverHandlers(t.btnHoverBg) : {})}
         >
           <LogoutIcon color={t.textSub} />
         </button>
@@ -172,7 +168,7 @@ export function TopBar({
   );
 }
 
-function iconBtn(_hoverBg?: string): React.CSSProperties {
+function iconBtn(): React.CSSProperties {
   return {
     width: 28,
     height: 28,

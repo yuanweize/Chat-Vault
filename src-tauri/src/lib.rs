@@ -88,21 +88,8 @@ fn conversation_meta_info(jsonl_file: &Path) -> (bool, Option<String>) {
     (has_failed, created_at)
 }
 
-// ============================================================================
-// Tauri 命令：账号管理
-// ============================================================================
-
-#[tauri::command]
-fn delete_conversation(
-    app: tauri::AppHandle,
-    account_id: String,
-    conversation_id: String,
-) -> Result<(), String> {
-    let data_dir = app.path().app_data_dir().str_err()?;
-    let account_dir = data_dir.join("accounts").join(&account_id);
-    let bare_id = protocol::strip_c_prefix(&conversation_id);
-
-    // 1. 读取 JSONL 收集所有引用的 mediaId，然后删除 JSONL
+/// 读取对话 JSONL，收集媒体 ID，删除 JSONL 文件，并清理对应媒体文件和 manifest。
+fn delete_jsonl_and_media(account_dir: &Path, bare_id: &str) -> Result<(), String> {
     let conv_file = account_dir
         .join("conversations")
         .join(format!("{}.jsonl", bare_id));
@@ -129,25 +116,39 @@ fn delete_conversation(
         }
         std::fs::remove_file(&conv_file).str_err()?;
     }
-
-    // 2. 删除该对话的媒体文件，并清理 media_manifest.json
     if !media_ids.is_empty() {
         let media_dir = account_dir.join("media");
         for mid in &media_ids {
-            let media_path = media_dir.join(mid);
-            if media_path.exists() {
-                let _ = std::fs::remove_file(&media_path);
-            }
+            let _ = std::fs::remove_file(media_dir.join(mid));
         }
-        let manifest = storage::load_media_manifest(&account_dir);
+        let manifest = storage::load_media_manifest(account_dir);
         let cleaned: std::collections::HashMap<String, String> = manifest
             .into_iter()
             .filter(|(_url, name)| !media_ids.contains(name))
             .collect();
-        let _ = storage::save_media_manifest(&account_dir, &cleaned);
+        let _ = storage::save_media_manifest(account_dir, &cleaned);
     }
+    Ok(())
+}
 
-    // 3. 从 conversations.json 移除该条记录，同步更新 totalCount
+// ============================================================================
+// Tauri 命令：账号管理
+// ============================================================================
+
+#[tauri::command]
+fn delete_conversation(
+    app: tauri::AppHandle,
+    account_id: String,
+    conversation_id: String,
+) -> Result<(), String> {
+    let data_dir = app.path().app_data_dir().str_err()?;
+    let account_dir = data_dir.join("accounts").join(&account_id);
+    let bare_id = protocol::strip_c_prefix(&conversation_id);
+
+    // 1. 清理 JSONL 和关联媒体文件
+    delete_jsonl_and_media(&account_dir, &bare_id)?;
+
+    // 2. 从 conversations.json 移除该条记录，同步更新 totalCount
     let index_file = account_dir.join("conversations.json");
     let new_count: Option<usize> = if index_file.exists() {
         let raw = std::fs::read_to_string(&index_file).str_err()?;
@@ -173,7 +174,7 @@ fn delete_conversation(
         None
     };
 
-    // 4. 同步更新 meta.json 中的 conversationCount
+    // 3. 同步更新 meta.json 中的 conversationCount
     if let Some(count) = new_count {
         let meta_file = account_dir.join("meta.json");
         if meta_file.exists() {
@@ -188,7 +189,7 @@ fn delete_conversation(
         }
     }
 
-    // 5. 清理搜索索引
+    // 4. 清理搜索索引
     if let Ok(index) = search::open_or_create_index(&account_dir) {
         let _ = search::remove_conversation(&index, &account_dir, &bare_id);
     }
@@ -207,52 +208,10 @@ fn clear_conversation_data(
     let account_dir = data_dir.join("accounts").join(&account_id);
     let bare_id = protocol::strip_c_prefix(&conversation_id);
 
-    // 1. 读取 JSONL 收集 mediaId，然后删除
-    let conv_file = account_dir
-        .join("conversations")
-        .join(format!("{}.jsonl", bare_id));
-    let mut media_ids: std::collections::HashSet<String> = std::collections::HashSet::new();
-    if conv_file.exists() {
-        if let Ok(raw) = std::fs::read_to_string(&conv_file) {
-            for line in raw.lines() {
-                let s = line.trim();
-                if s.is_empty() {
-                    continue;
-                }
-                if let Ok(row) = serde_json::from_str::<serde_json::Value>(s) {
-                    if let Some(atts) = row.get("attachments").and_then(|v| v.as_array()) {
-                        for att in atts {
-                            if let Some(mid) = att.get("mediaId").and_then(|v| v.as_str()) {
-                                if !mid.is_empty() {
-                                    media_ids.insert(mid.to_string());
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        std::fs::remove_file(&conv_file).str_err()?;
-    }
+    // 1. 清理 JSONL 和关联媒体文件
+    delete_jsonl_and_media(&account_dir, &bare_id)?;
 
-    // 2. 删除媒体文件，清理 manifest
-    if !media_ids.is_empty() {
-        let media_dir = account_dir.join("media");
-        for mid in &media_ids {
-            let p = media_dir.join(mid);
-            if p.exists() {
-                let _ = std::fs::remove_file(&p);
-            }
-        }
-        let manifest = storage::load_media_manifest(&account_dir);
-        let cleaned: std::collections::HashMap<String, String> = manifest
-            .into_iter()
-            .filter(|(_url, name)| !media_ids.contains(name))
-            .collect();
-        let _ = storage::save_media_manifest(&account_dir, &cleaned);
-    }
-
-    // 3. conversations.json 中保留条目但将计数归零
+    // 2. conversations.json 中保留条目但将计数归零
     let index_file = account_dir.join("conversations.json");
     if index_file.exists() {
         let raw = std::fs::read_to_string(&index_file).str_err()?;
@@ -322,13 +281,9 @@ fn clear_account_data(
     }
     // 清理搜索索引
     let search_idx_dir = account_dir.join("search_index");
-    if search_idx_dir.exists() {
-        let _ = std::fs::remove_dir_all(&search_idx_dir);
-    }
+    let _ = std::fs::remove_dir_all(&search_idx_dir);
     let search_mtimes = account_dir.join("search_mtimes.json");
-    if search_mtimes.exists() {
-        let _ = std::fs::remove_file(&search_mtimes);
-    }
+    let _ = std::fs::remove_file(&search_mtimes);
 
     std::fs::create_dir_all(&conversations_dir).str_err()?;
     std::fs::create_dir_all(&media_dir).str_err()?;

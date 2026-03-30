@@ -417,15 +417,8 @@ impl WorkerHost {
             &self.output_dir,
             account_id,
         ));
-        let updated_ids_from_list: std::collections::HashSet<String> = list_result
-            .get("updatedIds")
-            .and_then(|v| v.as_array())
-            .map(|arr| {
-                arr.iter()
-                    .filter_map(|v| v.as_str().map(|s| s.to_string()))
-                    .collect()
-            })
-            .unwrap_or_default();
+        let updated_ids_from_list: std::collections::HashSet<String> =
+            extract_string_vec(&list_result, "updatedIds").into_iter().collect();
 
         let new_ids: Vec<String> = after_ids
             .iter()
@@ -582,15 +575,7 @@ impl WorkerHost {
 
         // 1) 同步列表
         let list_result = self.execute_sync_list(ctx, true, cancel).await?;
-        let updated_ids: Vec<String> = list_result
-            .get("updatedIds")
-            .and_then(|v| v.as_array())
-            .map(|arr| {
-                arr.iter()
-                    .filter_map(|v| v.as_str().map(|s| s.to_string()))
-                    .collect()
-            })
-            .unwrap_or_default();
+        let updated_ids = extract_string_vec(&list_result, "updatedIds");
 
         // 2) 同步有更新的会话
         if !updated_ids.is_empty() {
@@ -797,15 +782,21 @@ fn to_error_payload(e: &str) -> Value {
     })
 }
 
+/// 从 JSON Value 中提取指定 key 对应的字符串数组
+fn extract_string_vec(value: &Value, key: &str) -> Vec<String> {
+    value
+        .get(key)
+        .and_then(|v| v.as_array())
+        .map(|arr| arr.iter().filter_map(|v| v.as_str().map(|s| s.to_string())).collect())
+        .unwrap_or_default()
+}
+
 /// 读取 conversations.json 的 items
 fn load_conversation_items(output_dir: &Path, account_id: &str) -> Vec<Value> {
     let conv_index = output_dir
         .join("accounts")
         .join(account_id)
         .join("conversations.json");
-    if !conv_index.exists() {
-        return Vec::new();
-    }
     std::fs::read_to_string(&conv_index)
         .ok()
         .and_then(|c| serde_json::from_str::<Value>(&c).ok())
