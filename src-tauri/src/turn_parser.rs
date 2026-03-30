@@ -532,80 +532,40 @@ pub fn parse_media_item(item: &Value, role: &str) -> MediaFile {
         None => return media,
     };
 
-    let type_val = arr.get(1).and_then(|v| v.as_i64());
     media.filename = arr.get(2).and_then(|v| v.as_str()).map(|s| s.to_string());
     media.mime = arr.get(11).and_then(|v| v.as_str()).map(|s| s.to_string());
 
-    match type_val {
-        Some(1) => {
-            media.media_type = "image".to_string();
-            if let Some(u) = arr.get(3).and_then(|v| v.as_str()) {
-                media.url = Some(u.to_string());
-            }
+    // 基于 MIME type 前缀分类，不依赖 arr[1] 的不透明整数
+    let mime_prefix = media.mime.as_deref().unwrap_or("");
+    if mime_prefix.starts_with("image/") {
+        media.media_type = "image".to_string();
+    } else if mime_prefix.starts_with("video/") {
+        media.media_type = "video".to_string();
+    } else if mime_prefix.starts_with("audio/") {
+        media.media_type = "audio".to_string();
+    } else {
+        media.media_type = "attachment".to_string();
+    }
+
+    // URL 提取：image 用 arr[3]，其余用 arr[7][1] → arr[7][0] → arr[3]
+    if media.media_type == "image" {
+        if let Some(u) = arr.get(3).and_then(|v| v.as_str()) {
+            media.url = Some(u.to_string());
         }
-        Some(2) => {
-            media.media_type = "video".to_string();
-            if let Some(urls) = arr.get(7).and_then(|v| v.as_array()) {
-                if urls.len() > 1 {
-                    if let Some(u) = urls[1].as_str() {
-                        media.url = Some(u.to_string());
-                    }
-                }
-                if media.url.is_none() {
-                    if let Some(u) = urls.first().and_then(|v| v.as_str()) {
-                        media.url = Some(u.to_string());
-                    }
-                }
-                if let Some(u) = urls.first().and_then(|v| v.as_str()) {
-                    media.thumbnail_url = Some(u.to_string());
+    } else {
+        if let Some(urls) = arr.get(7).and_then(|v| v.as_array()) {
+            if urls.len() > 1 {
+                if let Some(u) = urls[1].as_str() {
+                    media.url = Some(u.to_string());
                 }
             }
             if media.url.is_none() {
-                if let Some(u) = arr.get(3).and_then(|v| v.as_str()) {
+                if let Some(u) = urls.first().and_then(|v| v.as_str()) {
                     media.url = Some(u.to_string());
                 }
             }
         }
-        Some(4) => {
-            media.media_type = "audio".to_string();
-            if let Some(urls) = arr.get(7).and_then(|v| v.as_array()) {
-                if urls.len() > 1 {
-                    if let Some(u) = urls[1].as_str() {
-                        media.url = Some(u.to_string());
-                    }
-                }
-                if media.url.is_none() {
-                    if let Some(u) = urls.first().and_then(|v| v.as_str()) {
-                        media.url = Some(u.to_string());
-                    }
-                }
-                if let Some(u) = urls.first().and_then(|v| v.as_str()) {
-                    media.thumbnail_url = Some(u.to_string());
-                }
-            }
-            if media.url.is_none() {
-                if let Some(u) = arr.get(3).and_then(|v| v.as_str()) {
-                    media.url = Some(u.to_string());
-                }
-            }
-        }
-        Some(16) => {
-            media.media_type = "attachment".to_string();
-            // 下载 URL 在 [7][1]，不需要缩略图
-            if let Some(urls) = arr.get(7).and_then(|v| v.as_array()) {
-                if urls.len() > 1 {
-                    if let Some(u) = urls[1].as_str() {
-                        media.url = Some(u.to_string());
-                    }
-                }
-                if media.url.is_none() {
-                    if let Some(u) = urls.first().and_then(|v| v.as_str()) {
-                        media.url = Some(u.to_string());
-                    }
-                }
-            }
-        }
-        _ => {
+        if media.url.is_none() {
             if let Some(u) = arr.get(3).and_then(|v| v.as_str()) {
                 media.url = Some(u.to_string());
             }
