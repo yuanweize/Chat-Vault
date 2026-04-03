@@ -20,15 +20,15 @@ Native desktop app for macOS & Windows · Multi-account · Light / Dark theme
 
 | Light theme | Dark theme |
 |:---:|:---:|
-| <img src=".github/images/account-picker-light.png" width="420"/> | <img src=".github/images/account-picker-dark.png" width="420"/> |
+| <img src=".github/images/account-picker-light.png" width="420" alt="Google Gemini multi-account picker desktop app light theme" title="Light theme" /> | <img src=".github/images/account-picker-dark.png" width="420" alt="Google Gemini multi-account picker desktop app dark theme" title="Dark theme" /> |
 
 | Chat view | Media messages |
 |:---:|:---:|
-| <img src=".github/images/chat-main.png" width="420"/> | <img src=".github/images/chat-media.png" width="420"/> |
+| <img src=".github/images/chat-main.png" width="420" alt="Google Gemini local chat history viewer and backup desktop interface" title="Chat view" /> | <img src=".github/images/chat-media.png" width="420" alt="Downloading and viewing Gemini AI-generated images and media messages locally" title="Media messages" /> |
 
 | Conversation list | Export |
 |:---:|:---:|
-| <img src=".github/images/chat-conversation.png" width="420"/> | <img src=".github/images/export-dialog.png" width="420"/> |
+| <img src=".github/images/chat-conversation.png" width="420" alt="Google Gemini conversation list sync and local backup management" title="Conversation list" /> | <img src=".github/images/export-dialog.png" width="420" alt="Exporting Google Gemini conversations to local Markdown and JSON formats" title="Export" /> |
 
 </div>
 

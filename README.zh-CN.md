@@ -20,15 +20,15 @@ macOS & Windows 原生应用 · 支持多账号 · 亮色 / 暗色主题
 
 | 默认主题 | 夜间主题 |
 |:---:|:---:|
-| <img src=".github/images/account-picker-light.png" width="420"/> | <img src=".github/images/account-picker-dark.png" width="420"/> |
+| <img src=".github/images/account-picker-light.png" width="420" alt="Google Gemini multi-account picker desktop app light theme" title="默认主题" /> | <img src=".github/images/account-picker-dark.png" width="420" alt="Google Gemini multi-account picker desktop app dark theme" title="夜间主题" /> |
 
 | 对话浏览 | 多媒体消息 |
 |:---:|:---:|
-| <img src=".github/images/chat-main.png" width="420"/> | <img src=".github/images/chat-media.png" width="420"/> |
+| <img src=".github/images/chat-main.png" width="420" alt="Google Gemini local chat history viewer and backup desktop interface" title="对话浏览" /> | <img src=".github/images/chat-media.png" width="420" alt="Downloading and viewing Gemini AI-generated images and media messages locally" title="多媒体消息" /> |
 
 | 对话导览 | 导出数据 |
 |:---:|:---:|
-| <img src=".github/images/chat-conversation.png" width="420"/> | <img src=".github/images/export-dialog.png" width="420"/> |
+| <img src=".github/images/chat-conversation.png" width="420" alt="Google Gemini conversation list sync and local backup management" title="对话导览" /> | <img src=".github/images/export-dialog.png" width="420" alt="Exporting Google Gemini conversations to local Markdown and JSON formats" title="导出数据" /> |
 
 </div>
 
