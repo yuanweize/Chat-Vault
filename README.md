@@ -10,6 +10,8 @@ Native desktop app for macOS & Windows · Multi-account · Light / Dark theme
 
 [**简体中文**](./README.zh-CN.md)
 
+![GitHub Release](https://img.shields.io/github/v/release/FirenzeLor/gemini-collector?color=blue)
+
 </div>
 
 ---

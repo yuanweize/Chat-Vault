@@ -10,6 +10,8 @@ macOS & Windows 原生应用 · 支持多账号 · 亮色 / 暗色主题
 
 [**English**](./README.md)
 
+![GitHub Release](https://img.shields.io/github/v/release/FirenzeLor/gemini-collector?color=blue)
+
 </div>
 
 ---
