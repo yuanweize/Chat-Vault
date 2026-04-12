@@ -551,6 +551,7 @@ pub fn turns_to_jsonl_rows(
     account_id: &str,
     title: &str,
     chat_info: &Value,
+    media_dir: &Path,
 ) -> Vec<Value> {
     let now_iso = Utc::now().to_rfc3339();
     let bare_id = crate::protocol::strip_c_prefix(conv_id);
@@ -666,12 +667,42 @@ pub fn turns_to_jsonl_rows(
         }
         if let Some(deep_research) = asst.and_then(|a| a.get("deep_research")) {
             if !deep_research.is_null() {
-                model_row["deepResearch"] = deep_research.clone();
+                let mut dr = deep_research.clone();
+                // 报告正文外置到 media 文件
+                if dr.get("type").and_then(|v| v.as_str()) == Some("report") {
+                    if let Some(text) = dr.get("report_text").and_then(|v| v.as_str()) {
+                        if !text.is_empty() {
+                            let media_id = format!("{}.md", Uuid::new_v4().to_string().replace("-", ""));
+                            let _ = std::fs::write(media_dir.join(&media_id), text.as_bytes());
+                            dr.as_object_mut().map(|o| {
+                                o.remove("report_text");
+                                o.insert("report_media_id".to_string(), json!(media_id));
+                            });
+                        }
+                    }
+                }
+                model_row["deepResearch"] = dr;
             }
         }
         if let Some(canvas) = asst.and_then(|a| a.get("canvas")) {
             if !canvas.is_null() {
-                model_row["canvas"] = canvas.clone();
+                let mut cv = canvas.clone();
+                // Canvas 代码内容外置到 media 文件
+                if let Some(content) = cv.get("content").and_then(|v| v.as_str()) {
+                    if !content.is_empty() {
+                        let ext = cv.get("filename")
+                            .and_then(|v| v.as_str())
+                            .and_then(|f| f.rsplit('.').next())
+                            .unwrap_or("txt");
+                        let media_id = format!("{}.{}", Uuid::new_v4().to_string().replace("-", ""), ext);
+                        let _ = std::fs::write(media_dir.join(&media_id), content.as_bytes());
+                        cv.as_object_mut().map(|o| {
+                            o.remove("content");
+                            o.insert("content_media_id".to_string(), json!(media_id));
+                        });
+                    }
+                }
+                model_row["canvas"] = cv;
             }
         }
         rows.push(model_row);
@@ -1139,4 +1170,105 @@ mod tests {
         assert_eq!(summary["title"], "test chat");
         assert_eq!(summary["messageCount"], 10);
     }
+
+    #[test]
+    fn test_turns_to_jsonl_externalizes_report() {
+        let tmp_dir = tempfile::tempdir().unwrap();
+        let media_dir = tmp_dir.path().join("media");
+        std::fs::create_dir_all(&media_dir).unwrap();
+
+        let report_text = "# 完整报告\n\n这是一份很长的研究报告...";
+        let turn = json!({
+            "turn_id": "t1",
+            "timestamp": 1700000000,
+            "user": { "text": "研究问题", "files": [] },
+            "assistant": {
+                "text": "已生成报告",
+                "thinking": "",
+                "model": "gemini-2.0",
+                "files": [],
+                "deep_research": {
+                    "type": "report",
+                    "title": "研究报告标题",
+                    "report_text": report_text,
+                    "research_id": "uuid-123",
+                    "document_id": "doc-456"
+                }
+            }
+        });
+
+        let rows = turns_to_jsonl_rows(
+            &[turn],
+            "conv_1", "account_1", "测试对话",
+            &json!({}),
+            &media_dir,
+        );
+
+        // 应有 3 行: meta + user + model
+        assert_eq!(rows.len(), 3);
+        let model_row = &rows[2];
+        let dr = model_row.get("deepResearch").unwrap();
+
+        // report_text 应被移除，替换为 report_media_id
+        assert!(dr.get("report_text").is_none(), "report_text 不应在 JSONL 中");
+        let media_id = dr.get("report_media_id").and_then(|v| v.as_str()).unwrap();
+        assert!(media_id.ends_with(".md"));
+
+        // media 文件应存在且内容正确
+        let file_content = std::fs::read_to_string(media_dir.join(media_id)).unwrap();
+        assert_eq!(file_content, report_text);
+
+        // 其他字段应保留
+        assert_eq!(dr["type"], "report");
+        assert_eq!(dr["title"], "研究报告标题");
+        assert_eq!(dr["research_id"], "uuid-123");
+    }
+
+    #[test]
+    fn test_turns_to_jsonl_externalizes_canvas() {
+        let tmp_dir = tempfile::tempdir().unwrap();
+        let media_dir = tmp_dir.path().join("media");
+        std::fs::create_dir_all(&media_dir).unwrap();
+
+        let canvas_content = "<!DOCTYPE html><html><body><h1>Hello</h1></body></html>";
+        let turn = json!({
+            "turn_id": "t2",
+            "timestamp": 1700000000,
+            "user": { "text": "做一个网页", "files": [] },
+            "assistant": {
+                "text": "已创建",
+                "thinking": "",
+                "model": "gemini-2.0",
+                "files": [],
+                "canvas": {
+                    "title": "示例页面",
+                    "filename": "demo.html",
+                    "content": canvas_content,
+                    "language": "html",
+                    "document_id": "doc-789"
+                }
+            }
+        });
+
+        let rows = turns_to_jsonl_rows(
+            &[turn],
+            "conv_2", "account_1", "测试对话",
+            &json!({}),
+            &media_dir,
+        );
+
+        let model_row = &rows[2];
+        let cv = model_row.get("canvas").unwrap();
+
+        assert!(cv.get("content").is_none(), "content 不应在 JSONL 中");
+        let media_id = cv.get("content_media_id").and_then(|v| v.as_str()).unwrap();
+        assert!(media_id.ends_with(".html"));
+
+        let file_content = std::fs::read_to_string(media_dir.join(media_id)).unwrap();
+        assert_eq!(file_content, canvas_content);
+
+        assert_eq!(cv["title"], "示例页面");
+        assert_eq!(cv["filename"], "demo.html");
+    }
+
 }

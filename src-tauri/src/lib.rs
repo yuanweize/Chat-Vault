@@ -1004,6 +1004,19 @@ fn get_account_media_dir(app: tauri::AppHandle, account_id: String) -> Result<St
     Ok(media_dir.to_string_lossy().to_string())
 }
 
+/// 按需读取 media 文件内容（文本），用于前端延迟加载 report/canvas 等大文本。
+#[tauri::command]
+fn read_media_file(app: tauri::AppHandle, account_id: String, media_id: String) -> Result<String, String> {
+    let data_dir = app.path().app_data_dir().str_err()?;
+    let file_path = data_dir
+        .join("accounts")
+        .join(account_id)
+        .join("media")
+        .join(&media_id);
+    std::fs::read_to_string(&file_path)
+        .map_err(|e| format!("读取 media 文件失败 ({}): {}", media_id, e))
+}
+
 // ── 全文搜索 ──────────────────────────────────────────────────────────
 
 #[tauri::command]
@@ -1251,6 +1264,7 @@ pub fn run() {
             clear_conversation_data,
             load_conversation_summaries,
             get_account_media_dir,
+            read_media_file,
             load_conversation_detail,
             search_conversations,
             rebuild_search_index,

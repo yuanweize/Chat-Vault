@@ -25,14 +25,23 @@ export interface ConvMessage {
     title: string;
     steps?: { number: number; name: string; description?: string }[];
     estimated_time?: string;
-    report_text?: string;
+    progress?: {
+      type: "thinking" | "web_search" | "file_search";
+      title?: string;
+      description?: string;
+      round?: number;
+      url?: string;
+      page_title?: string;
+      filename?: string;
+    }[];
+    report_media_id?: string;  // media file id, load via read_media_file
     research_id?: string;
     document_id?: string;
   };
   canvas?: {
     title: string;
     filename: string;
-    content: string;
+    content_media_id?: string;  // media file id, load via read_media_file
     language: string;
     document_id?: string;
   };

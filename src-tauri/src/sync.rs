@@ -806,7 +806,7 @@ impl GeminiExporter {
             global_used_names,
         );
 
-        let rows = storage::turns_to_jsonl_rows(&parsed_turns, conv_id, account_id, title, chat_info);
+        let rows = storage::turns_to_jsonl_rows(&parsed_turns, conv_id, account_id, title, chat_info, media_dir);
         storage::write_jsonl_rows(jsonl_file, &rows).str_err()?;
 
         let mut failed_items = Vec::new();
@@ -882,7 +882,7 @@ impl GeminiExporter {
         );
 
         let new_rows_full =
-            storage::turns_to_jsonl_rows(&parsed_new_turns, conv_id, account_id, title, chat_info);
+            storage::turns_to_jsonl_rows(&parsed_new_turns, conv_id, account_id, title, chat_info, media_dir);
         let new_meta = &new_rows_full[0];
         let new_msg_rows = &new_rows_full[1..];
 

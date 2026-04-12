@@ -8,6 +8,7 @@
 //!   TEST_ACCOUNT    — 账号邮箱关键字（用于 email.contains() 匹配）
 //!   TEST_CONV_ID    — 主测试对话 ID（含所有媒体类型）
 //!   TEST_CONV_ID_2  — 第二个对话 ID（music_meta + gen_meta 交叉验证）
+//!   TEST_DR_CONV_ID — Deep Research 对话 ID
 
 use std::collections::HashSet;
 
@@ -24,6 +25,144 @@ fn test_conv_id() -> String {
 }
 fn test_conv_id_2() -> String {
     std::env::var("TEST_CONV_ID_2").expect("需设置环境变量 TEST_CONV_ID_2（第二个对话 ID）")
+}
+fn test_dr_conv_id() -> String {
+    std::env::var("TEST_DR_CONV_ID").expect("需设置环境变量 TEST_DR_CONV_ID（Deep Research 对话 ID）")
+}
+fn test_dr_conv_id_2() -> String {
+    std::env::var("TEST_DR_CONV_ID_2").expect("需设置环境变量 TEST_DR_CONV_ID_2（进行中的 Deep Research 对话 ID）")
+}
+
+async fn init_exporter() -> GeminiExporter {
+    let all_cookies = cookies::get_cookies_from_local_browser()
+        .expect("无法从本机浏览器读取 cookies");
+    let mappings = cookies::list_accounts::discover_email_authuser_mapping(&all_cookies)
+        .await
+        .expect("ListAccounts 失败");
+    let account = test_account();
+    let target = mappings.iter().find(|m| m.email.contains(&account))
+        .expect(&format!("未找到 {} 账号", account));
+    let mut exporter = GeminiExporter::new(all_cookies, target.authuser.clone(), None, None);
+    exporter.init_auth().await.expect("init_auth 失败");
+    exporter
+}
+
+/// 分析 Deep Research 对话的原始 turn 结构，dump 到指定目录
+async fn dump_dr_conversation(exporter: &GeminiExporter, conv_id: &str, dump_dir: &std::path::Path) {
+    let raw_turns = exporter.get_chat_detail(conv_id).await
+        .expect("get_chat_detail 失败");
+    eprintln!("\n[DR] 对话 {} 共 {} 轮", conv_id, raw_turns.len());
+
+    let _ = std::fs::create_dir_all(dump_dir);
+
+    for (i, turn) in raw_turns.iter().enumerate() {
+        let ai_data = turn.as_array()
+            .and_then(|a| a.get(3))
+            .and_then(|d| d.as_array())
+            .and_then(|d| d.first())
+            .and_then(|c| c.as_array())
+            .and_then(|c| c.first());
+
+        let ai = match ai_data {
+            Some(a) => a,
+            None => { eprintln!("  turn[{}]: 无 ai_data", i); continue; }
+        };
+
+        // dump 整轮原始数据
+        let turn_file = dump_dir.join(format!("turn_{}.json", i));
+        let _ = std::fs::write(&turn_file, serde_json::to_string_pretty(turn).unwrap_or_default());
+
+        // 检查 ai[12][8] 所有 key
+        let meta_dict = ai.as_array()
+            .and_then(|a| a.get(12))
+            .and_then(|b| b.as_array())
+            .and_then(|b| b.get(8));
+
+        let keys: Vec<String> = meta_dict
+            .and_then(|m| m.as_object())
+            .map(|obj| obj.keys().cloned().collect())
+            .unwrap_or_default();
+
+        let has_56 = keys.contains(&"56".to_string());
+        let has_57 = keys.contains(&"57".to_string());
+        let has_58 = keys.contains(&"58".to_string());
+        let has_70 = keys.contains(&"70".to_string());
+        let has_30 = ai.as_array().and_then(|a| a.get(30)).map(|v| !v.is_null()).unwrap_or(false);
+
+        // ai[30][0][10] 类型标记
+        let block30_type = ai.as_array()
+            .and_then(|a| a.get(30))
+            .and_then(|b| b.as_array())
+            .and_then(|a| a.first())
+            .and_then(|item| item.as_array())
+            .and_then(|a| a.get(10))
+            .and_then(|v| v.as_i64());
+        // ai[30][0][12] 完成标记
+        let block30_done = ai.as_array()
+            .and_then(|a| a.get(30))
+            .and_then(|b| b.as_array())
+            .and_then(|a| a.first())
+            .and_then(|item| item.as_array())
+            .and_then(|a| a.get(12))
+            .and_then(|v| v.as_bool());
+
+        let type_label = if has_30 { "HAS_30" } else if has_56 { "PLAN" } else { "NORMAL" };
+
+        eprintln!("  turn[{}]: {} | keys={:?} 30={} 30_type={:?} 30_done={:?}",
+            i, type_label, keys, has_30, block30_type, block30_done);
+
+        // ai 数组长度
+        if let Some(arr) = ai.as_array() {
+            eprintln!("         ai len={}", arr.len());
+        }
+
+        // dump 每个 meta key
+        if let Some(md) = meta_dict {
+            for key in &keys {
+                let kf = dump_dir.join(format!("turn_{}_{}.json", i, key));
+                if let Some(v) = md.get(key.as_str()) {
+                    let _ = std::fs::write(&kf, serde_json::to_string_pretty(v).unwrap_or_default());
+                }
+            }
+
+            if let Some(data_58) = md.get("58") {
+                let entry_count = data_58.as_array()
+                    .and_then(|a| a.get(1))
+                    .and_then(|v| v.as_array())
+                    .and_then(|a| a.get(4))
+                    .and_then(|v| v.as_array())
+                    .and_then(|a| a.get(2))
+                    .and_then(|v| v.as_array())
+                    .map(|a| a.len())
+                    .unwrap_or(0);
+                let data_len = serde_json::to_string(data_58).map(|s| s.len()).unwrap_or(0);
+                eprintln!("         58 条目数={}, JSON 字节={}", entry_count, data_len);
+            }
+        }
+
+        // 解析检查
+        let parsed = parse_turn(turn);
+        if let Some(ref dr) = parsed.assistant.deep_research {
+            let (dr_type, progress_len) = match dr {
+                gemini_collector_lib::turn_parser::DeepResearch::Plan { .. } =>
+                    ("plan", 0),
+                gemini_collector_lib::turn_parser::DeepResearch::Report { progress, .. } =>
+                    ("report", progress.as_ref().map(|p| p.len()).unwrap_or(0)),
+            };
+            eprintln!("         parsed: type={}, progress_entries={}", dr_type, progress_len);
+        } else {
+            eprintln!("         parsed: no deep_research");
+        }
+
+        // assistant text 片段
+        let atxt = &parsed.assistant.text;
+        if !atxt.is_empty() {
+            let preview: String = atxt.chars().take(100).collect();
+            eprintln!("         text: {}...", preview);
+        }
+    }
+
+    eprintln!("\n[DR] 原始数据已 dump 到 {}", dump_dir.display());
 }
 
 // ============================================================================
@@ -429,5 +568,23 @@ async fn test_api_full_pipeline() {
     eprintln!("\n══════════════════════════════════════════════════");
     eprintln!("  FINAL: PASSED={}, KNOWN ISSUES={}", passed, known_issues);
     eprintln!("══════════════════════════════════════════════════\n");
+}
+
+/// Deep Research 已完成对话：验证 plan/report turn 结构
+#[tokio::test]
+#[ignore]
+async fn test_deep_research_completed() {
+    let exporter = init_exporter().await;
+    let dump_dir = std::path::Path::new("/tmp/gemini_dr_dump/completed");
+    dump_dr_conversation(&exporter, &test_dr_conv_id(), dump_dir).await;
+}
+
+/// Deep Research 进行中对话：分析中间状态的 turn 结构
+#[tokio::test]
+#[ignore]
+async fn test_deep_research_in_progress() {
+    let exporter = init_exporter().await;
+    let dump_dir = std::path::Path::new("/tmp/gemini_dr_dump/in_progress");
+    dump_dr_conversation(&exporter, &test_dr_conv_id_2(), dump_dir).await;
 }
 

@@ -78,6 +78,10 @@ fn sanitize_file_component(raw: &str) -> String {
     }
 }
 
+fn is_search_index_path(name: &str) -> bool {
+    name == "search_index" || name == "search_mtimes.json"
+}
+
 fn count_files_and_bytes_recursive(root: &Path) -> Result<(u64, u64), String> {
     if !root.exists() {
         return Ok((0, 0));
@@ -90,6 +94,10 @@ fn count_files_and_bytes_recursive(root: &Path) -> Result<(u64, u64), String> {
     while let Some(dir) = stack.pop() {
         for entry in std::fs::read_dir(&dir).str_err()? {
             let entry = entry.str_err()?;
+            let name = entry.file_name();
+            if is_search_index_path(name.to_str().unwrap_or("")) {
+                continue;
+            }
             let file_type = entry.file_type().str_err()?;
             if file_type.is_dir() {
                 stack.push(entry.path());
@@ -229,6 +237,10 @@ fn collect_files(dir: &Path, out: &mut Vec<std::path::PathBuf>) -> std::io::Resu
     for entry in std::fs::read_dir(dir)? {
         let entry = entry?;
         let path = entry.path();
+        let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+        if is_search_index_path(name) {
+            continue;
+        }
         if path.is_dir() {
             collect_files(&path, out)?;
         } else {
