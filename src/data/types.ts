@@ -37,6 +37,8 @@ export interface ConvMessage {
     report_media_id?: string;  // media file id, load via read_media_file
     research_id?: string;
     document_id?: string;
+    size_bytes?: number;   // report media file byte size
+    char_count?: number;   // report text char count
   };
   canvas?: {
     title: string;
@@ -44,6 +46,8 @@ export interface ConvMessage {
     content_media_id?: string;  // media file id, load via read_media_file
     language: string;
     document_id?: string;
+    size_bytes?: number;   // canvas media file byte size
+    char_count?: number;   // canvas content char count
   };
 }
 

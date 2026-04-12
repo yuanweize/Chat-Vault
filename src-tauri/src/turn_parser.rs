@@ -168,7 +168,9 @@ fn vlen(v: &Value) -> usize {
 
 fn placeholder_path_re() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
-    RE.get_or_init(|| Regex::new(r"(?:^|/)[a-z0-9_]+_content(?:/|$)").unwrap())
+    RE.get_or_init(|| {
+        Regex::new(r"(?:^|/)(?:[a-z0-9_]+_content|immersive_entry_chip)(?:/|$)").unwrap()
+    })
 }
 
 fn url_extract_re() -> &'static Regex {
@@ -1090,10 +1092,21 @@ pub fn parse_turn(turn: &Value) -> ParsedTurn {
             result.assistant.files.push(parsed);
         }
 
-        // Sanitize placeholder text
+        // Deep Research: report turn 有 ai[30]，plan turn 有 ai[12][8]["56"]
+        // 两者都可能附带 ai[12][8]["58"] 进度数据（已在各自提取函数内处理）
+        result.assistant.deep_research = extract_deep_research_report(ai)
+            .or_else(|| extract_deep_research_plan(ai));
+
+        // Canvas
+        result.assistant.canvas = extract_canvas(ai);
+
+        // Sanitize placeholder text (deep_research / canvas turn 的正文也是占位 URL)
+        let needs_sanitize = !result.assistant.files.is_empty()
+            || result.assistant.deep_research.is_some()
+            || result.assistant.canvas.is_some();
         result.assistant.text = sanitize_generation_placeholder_text(
             &result.assistant.text,
-            !result.assistant.files.is_empty(),
+            needs_sanitize,
         );
 
         // Strip citation markers ([cite_start], [cite: N, ...])
@@ -1124,14 +1137,6 @@ pub fn parse_turn(turn: &Value) -> ParsedTurn {
         if gen_meta.is_some() {
             result.assistant.gen_meta = gen_meta;
         }
-
-        // Deep Research: report turn 有 ai[30]，plan turn 有 ai[12][8]["56"]
-        // 两者都可能附带 ai[12][8]["58"] 进度数据（已在各自提取函数内处理）
-        result.assistant.deep_research = extract_deep_research_report(ai)
-            .or_else(|| extract_deep_research_plan(ai));
-
-        // Canvas
-        result.assistant.canvas = extract_canvas(ai);
     }
 
     result
@@ -1255,6 +1260,10 @@ mod tests {
         ));
         assert!(is_internal_placeholder_content_url(
             "https://lh3.googleusercontent.com/some_content/"
+        ));
+        // Canvas / Deep Research 已完成报告使用 immersive_entry_chip
+        assert!(is_internal_placeholder_content_url(
+            "http://googleusercontent.com/immersive_entry_chip/0"
         ));
         assert!(!is_internal_placeholder_content_url(
             "https://example.com/abc_content/def"

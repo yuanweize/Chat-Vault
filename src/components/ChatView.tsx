@@ -8,12 +8,12 @@ import rehypeRaw from "rehype-raw";
 import "katex/dist/katex.min.css";
 import { Virtuoso, VirtuosoHandle } from "react-virtuoso";
 import { convertFileSrc } from "@tauri-apps/api/core";
-import { openUrl } from "@tauri-apps/plugin-opener";
+import { openUrl, openPath } from "@tauri-apps/plugin-opener";
 import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
 import { oneLight, vscDarkPlus } from "react-syntax-highlighter/dist/esm/styles/prism";
 import { Attachment, Conversation, ConvMessage } from "../data/types";
 import { useTheme } from "../theme";
-import { CopyIcon, CheckIcon } from "./Icons";
+import { CopyIcon, CheckIcon, ChevronRightIcon, DocIcon, SparkIcon, SearchIcon, ExternalLinkIcon } from "./Icons";
 
 const loadedImageUrlCache = new Set<string>();
 
@@ -624,6 +624,13 @@ function formatMsgTime(iso: string): string {
   } catch {
     return iso;
   }
+}
+
+function formatBytes(n: number): string {
+  if (!Number.isFinite(n) || n <= 0) return "0 B";
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+  return `${(n / 1048576).toFixed(1)} MB`;
 }
 
 // Format ISO 8601 to "YYYY-MM-DD"
@@ -1341,6 +1348,454 @@ function LightboxModal({
   );
 }
 
+// ── Canvas / Deep Research bubbles ─────────────────────────────────────────
+// 设计原则：不做"塞进气泡的按钮卡片"。Plan/Report 直接复用 AI 气泡外壳（同
+// aiBubbleBg、同圆角、同阴影）；Canvas 做成消息下方的"附件条"。所有可点击区域
+// 去明显 border，仅 hover 时用 Apple 蓝极淡 tint，不做 scale 形变。
+
+const ACCENT_BLUE = "#0071e3";
+const ACCENT_BLUE_DARK = "#9cc9ff";
+
+// AI markdown 正文渲染（复用于 AI 气泡、plan/report 气泡内部 header）
+function AIMarkdown({ text, isDark }: { text: string; isDark: boolean }) {
+  return (
+    <div className={`prose-ai${isDark ? " prose-dark" : ""}`}>
+      <ReactMarkdown
+        remarkPlugins={[remarkGfm, remarkMath]}
+        rehypePlugins={[rehypeRaw, rehypeKatex]}
+        components={{
+          a: ({ href, children, ...props }) => (
+            <a
+              {...props}
+              href={href}
+              target="_blank"
+              rel="noopener noreferrer"
+              onClick={(e) => {
+                e.preventDefault();
+                if (!href) return;
+                void openUrl(href);
+              }}
+            >
+              {children}
+            </a>
+          ),
+          pre: ({ children }) => <>{children}</>,
+          code: ({ className, children, ...props }) => {
+            const content = String(children ?? "");
+            const isBlock =
+              (className || "").includes("language-") || content.includes("\n");
+            if (!isBlock) {
+              return (
+                <code className={className} {...props}>
+                  {children}
+                </code>
+              );
+            }
+            return (
+              <MarkdownCodeBlock
+                code={content.replace(/\n$/, "")}
+                language={markdownCodeLanguage(className)}
+                isDark={isDark}
+              />
+            );
+          },
+        }}
+      >
+        {fixMarkdown(text)}
+      </ReactMarkdown>
+    </div>
+  );
+}
+
+function aiShellStyle(t: ReturnType<typeof useTheme>): React.CSSProperties {
+  return {
+    background: t.aiBubbleBg,
+    borderRadius: "18px 18px 18px 6px",
+    boxShadow: t.isDark ? "0 1px 3px rgba(0,0,0,0.3)" : "0 1px 3px rgba(0,0,0,0.07)",
+    overflow: "hidden",
+  };
+}
+
+function rowHoverBg(t: ReturnType<typeof useTheme>) {
+  return t.isDark ? "rgba(124,167,255,0.10)" : "rgba(0,113,227,0.06)";
+}
+
+// Apple 蓝 halo dot：外圈淡底 + 内实心点，避免扁平感。
+function HaloDot({ t, filled = true }: { t: ReturnType<typeof useTheme>; filled?: boolean }) {
+  const accent = t.isDark ? ACCENT_BLUE_DARK : ACCENT_BLUE;
+  return (
+    <div
+      style={{
+        width: 16,
+        height: 16,
+        borderRadius: "50%",
+        background: t.isDark ? "rgba(124,167,255,0.18)" : "rgba(0,113,227,0.15)",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        flexShrink: 0,
+      }}
+    >
+      <div
+        style={{
+          width: 7,
+          height: 7,
+          borderRadius: "50%",
+          background: filled ? accent : "transparent",
+          border: filled ? "none" : `1.5px solid ${accent}`,
+        }}
+      />
+    </div>
+  );
+}
+
+function CanvasBubble({
+  canvas,
+  mediaDir,
+}: {
+  canvas: NonNullable<ConvMessage["canvas"]>;
+  mediaDir?: string;
+}) {
+  const t = useTheme();
+  const [hovered, setHovered] = useState(false);
+  const absPath = mediaDir && canvas.content_media_id ? `${mediaDir}/${canvas.content_media_id}` : "";
+  const disabled = !absPath;
+  const lang = (canvas.language || "file").toUpperCase();
+  const chars = canvas.char_count ?? 0;
+  const bytes = canvas.size_bytes ?? 0;
+  const metaBits: string[] = [];
+  if (chars > 0) metaBits.push(`${chars.toLocaleString()} 字`);
+  if (bytes > 0) metaBits.push(formatBytes(bytes));
+  const metaText = metaBits.join(" · ");
+
+  async function handleOpen() {
+    if (disabled) return;
+    try {
+      await openPath(absPath);
+    } catch (err) {
+      console.error("openPath failed:", err);
+    }
+  }
+
+  const accent = t.isDark ? ACCENT_BLUE_DARK : ACCENT_BLUE;
+
+  return (
+    <button
+      type="button"
+      onClick={handleOpen}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+      disabled={disabled}
+      title={disabled ? "media 文件缺失" : `在系统默认应用中打开 ${canvas.filename}`}
+      style={{
+        display: "flex",
+        alignItems: "center",
+        gap: 10,
+        width: "100%",
+        padding: "8px 12px 8px 10px",
+        borderRadius: 12,
+        border: "none",
+        background: hovered && !disabled
+          ? (t.isDark ? "rgba(255,255,255,0.08)" : "rgba(255,255,255,0.62)")
+          : (t.isDark ? "rgba(255,255,255,0.04)" : "rgba(255,255,255,0.38)"),
+        cursor: disabled ? "default" : "pointer",
+        textAlign: "left",
+        color: t.text,
+        transition: "background 0.15s",
+        opacity: disabled ? 0.55 : 1,
+      }}
+    >
+      {/* 语言徽标 + 文档图标叠层 */}
+      <div
+        style={{
+          position: "relative",
+          width: 36,
+          height: 36,
+          borderRadius: 9,
+          background: t.isDark ? "rgba(124,167,255,0.12)" : "rgba(0,113,227,0.08)",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          flexShrink: 0,
+        }}
+      >
+        <DocIcon color={accent} size={18} />
+        <span
+          style={{
+            position: "absolute",
+            bottom: -3,
+            right: -4,
+            fontSize: 8,
+            fontWeight: 700,
+            letterSpacing: 0.3,
+            padding: "1px 4px",
+            borderRadius: 4,
+            background: accent,
+            color: "#fff",
+            lineHeight: 1.2,
+          }}
+        >
+          {lang.slice(0, 4)}
+        </span>
+      </div>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ fontSize: 13, fontWeight: 600, color: t.text, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+          {canvas.filename || canvas.title || "canvas"}
+        </div>
+        <div style={{ fontSize: 11, color: t.textSub, marginTop: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+          {canvas.title && canvas.title !== canvas.filename ? canvas.title : ""}
+          {canvas.title && canvas.title !== canvas.filename && metaText ? " · " : ""}
+          {metaText}
+        </div>
+      </div>
+      <ExternalLinkIcon color={hovered && !disabled ? accent : t.textMuted} />
+    </button>
+  );
+}
+
+function ResearchPlanBubble({
+  plan,
+  leadingText,
+}: {
+  plan: NonNullable<ConvMessage["deepResearch"]>;
+  leadingText?: string;
+}) {
+  const t = useTheme();
+  const steps = plan.steps ?? [];
+  const railColor = t.isDark ? "rgba(255,255,255,0.12)" : "rgba(0,0,0,0.08)";
+  const accent = t.isDark ? ACCENT_BLUE_DARK : ACCENT_BLUE;
+  const hasLeading = !!(leadingText && leadingText.trim().length > 0);
+
+  return (
+    <div style={{ ...aiShellStyle(t), padding: "14px 18px 16px" }}>
+      {/* 引导正文（如"我已经更新了方案..."），仅靠 spacing 与计划区自然分层，不画分割线 */}
+      {hasLeading && (
+        <div style={{ fontSize: 14, lineHeight: 1.55, color: t.text, wordBreak: "break-word", marginBottom: 14 }}>
+          <AIMarkdown text={leadingText!} isDark={t.isDark} />
+        </div>
+      )}
+
+      {/* 小号 accent 标签 + 标题 */}
+      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12 }}>
+        <div style={{
+          display: "inline-flex",
+          alignItems: "center",
+          gap: 4,
+          fontSize: 10,
+          fontWeight: 600,
+          letterSpacing: 0.4,
+          padding: "2px 7px",
+          borderRadius: 999,
+          background: t.isDark ? "rgba(124,167,255,0.14)" : "rgba(0,113,227,0.10)",
+          color: accent,
+          textTransform: "uppercase",
+        }}>
+          <SparkIcon color={accent} size={10} />
+          研究计划
+        </div>
+        {plan.title && (
+          <div style={{ fontSize: 13.5, fontWeight: 600, color: t.text, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+            {plan.title}
+          </div>
+        )}
+      </div>
+
+      {/* 垂直时间线：dot 在左，name/description 在右 */}
+      <div style={{ position: "relative" }}>
+        {/* 左侧连贯竖线 —— 延伸覆盖所有 step 中心 */}
+        {steps.length > 1 && (
+          <div
+            style={{
+              position: "absolute",
+              left: 7.5, // HaloDot 宽度 16 的中心
+              top: 14,
+              bottom: 14,
+              width: 1,
+              background: railColor,
+            }}
+          />
+        )}
+        {steps.map((s, i) => {
+          const hasDesc = !!(s.description && s.description.trim().length > 0);
+          return (
+            <div
+              key={i}
+              style={{
+                display: "flex",
+                gap: 12,
+                alignItems: "flex-start",
+                padding: i === 0 ? "0 0 10px" : i === steps.length - 1 ? "10px 0 0" : "10px 0",
+                position: "relative",
+              }}
+            >
+              {/* dot 容器给竖线让路，用外壳同色背景遮盖线段 */}
+              <div style={{ position: "relative", zIndex: 1, paddingTop: 2, background: t.aiBubbleBg }}>
+                <HaloDot t={t} />
+              </div>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 13, fontWeight: 600, color: t.text, lineHeight: 1.4 }}>
+                  {s.name}
+                </div>
+                {hasDesc && (
+                  <div
+                    style={{
+                      marginTop: 6,
+                      fontSize: 12.5,
+                      color: t.textSub,
+                      lineHeight: 1.65,
+                      whiteSpace: "pre-wrap",
+                      wordBreak: "break-word",
+                    }}
+                  >
+                    {s.description}
+                  </div>
+                )}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      {plan.estimated_time && (
+        <div style={{ marginTop: 12, fontSize: 11, color: t.textMuted }}>{plan.estimated_time}</div>
+      )}
+    </div>
+  );
+}
+
+function ResearchReportBubble({
+  report,
+  leadingText,
+}: {
+  report: NonNullable<ConvMessage["deepResearch"]>;
+  leadingText?: string;
+}) {
+  const t = useTheme();
+  const [progressHovered, setProgressHovered] = useState(false);
+  const [reportHovered, setReportHovered] = useState(false);
+  const accent = t.isDark ? ACCENT_BLUE_DARK : ACCENT_BLUE;
+  const hasLeading = !!(leadingText && leadingText.trim().length > 0);
+
+  const progress = report.progress ?? [];
+  const rounds = progress.reduce((max, p) => {
+    if (p.type === "thinking" && typeof p.round === "number" && p.round + 1 > max) return p.round + 1;
+    return max;
+  }, 0);
+  const webCount = progress.filter((p) => p.type === "web_search").length;
+  const fileCount = progress.filter((p) => p.type === "file_search").length;
+  const sourceCount = webCount + fileCount;
+  const progressBits: string[] = [];
+  if (rounds > 0) progressBits.push(`${rounds} 轮`);
+  if (sourceCount > 0) progressBits.push(`${sourceCount} 个来源`);
+  const progressMeta = progressBits.join(" · ") || `${progress.length} 条记录`;
+  const progressDisabled = progress.length === 0;
+
+  const chars = report.char_count ?? 0;
+  const bytes = report.size_bytes ?? 0;
+  const reportBits: string[] = [];
+  if (chars > 0) reportBits.push(`${chars.toLocaleString()} 字`);
+  if (bytes > 0) reportBits.push(formatBytes(bytes));
+  const reportMeta = reportBits.join(" · ");
+  const reportDisabled = !report.report_media_id;
+
+
+  function row(opts: {
+    icon: React.ReactNode;
+    label: string;
+    main: string;
+    meta: string;
+    hovered: boolean;
+    setHovered: (v: boolean) => void;
+    disabled: boolean;
+    onClick: () => void;
+    title?: string;
+  }) {
+    return (
+      <button
+        type="button"
+        onClick={opts.onClick}
+        onMouseEnter={() => opts.setHovered(true)}
+        onMouseLeave={() => opts.setHovered(false)}
+        disabled={opts.disabled}
+        title={opts.title}
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 12,
+          width: "100%",
+          padding: "12px 16px",
+          border: "none",
+          background: opts.hovered && !opts.disabled ? rowHoverBg(t) : "transparent",
+          cursor: opts.disabled ? "default" : "pointer",
+          textAlign: "left",
+          color: t.text,
+          transition: "background 0.15s",
+          opacity: opts.disabled ? 0.55 : 1,
+        }}
+      >
+        <div style={{
+          flex: "0 0 auto",
+          width: 30,
+          height: 30,
+          borderRadius: 8,
+          background: t.isDark ? "rgba(124,167,255,0.12)" : "rgba(0,113,227,0.08)",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+        }}>
+          {opts.icon}
+        </div>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ fontSize: 10.5, color: t.textMuted, letterSpacing: 0.4, marginBottom: 2, textTransform: "uppercase" }}>
+            {opts.label}
+          </div>
+          <div style={{ fontSize: 13, fontWeight: 600, color: t.text, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+            {opts.main}
+          </div>
+          {opts.meta && (
+            <div style={{ fontSize: 11, color: t.textSub, marginTop: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+              {opts.meta}
+            </div>
+          )}
+        </div>
+        <ChevronRightIcon color={opts.hovered && !opts.disabled ? accent : t.textMuted} />
+      </button>
+    );
+  }
+
+  return (
+    <div style={aiShellStyle(t)}>
+      {hasLeading && (
+        <div style={{ padding: "14px 18px 6px", fontSize: 14, lineHeight: 1.55, color: t.text, wordBreak: "break-word" }}>
+          <AIMarkdown text={leadingText!} isDark={t.isDark} />
+        </div>
+      )}
+      {row({
+        icon: <SearchIcon color={accent} />,
+        label: "调研过程",
+        main: progress.length > 0 ? progressMeta : "无调研记录",
+        meta: progress.length > 0 && progressBits.length === 2 ? `共 ${progress.length} 条记录` : "",
+        hovered: progressHovered,
+        setHovered: setProgressHovered,
+        disabled: progressDisabled,
+        onClick: () => { /* detail view 后续迭代 */ },
+        title: progressDisabled ? "暂无调研记录" : "查看调研过程（即将支持）",
+      })}
+      {row({
+        icon: <DocIcon color={accent} />,
+        label: "报告详情",
+        main: report.title || "研究报告",
+        meta: reportMeta,
+        hovered: reportHovered,
+        setHovered: setReportHovered,
+        disabled: reportDisabled,
+        onClick: () => { /* detail view 后续迭代 */ },
+        title: reportDisabled ? "报告正文缺失" : "查看报告详情（即将支持）",
+      })}
+    </div>
+  );
+}
+
 function MessageBubble({
   message,
   mediaDir,
@@ -1356,6 +1811,13 @@ function MessageBubble({
   const [copiedId, setCopiedId] = useState(false);
   const isUser = message.role === "user";
   const hasText = (message.text || "").trim().length > 0;
+  const dr = message.deepResearch;
+  const isPlan = !isUser && dr?.type === "plan";
+  const isReport = !isUser && dr?.type === "report";
+  const hasCanvas = !isUser && !!message.canvas;
+  // plan/report 把文字融入同一个气泡壳内，不再单独渲染文字气泡。
+  // canvas 仍保留上方文字气泡（canvas 自身是下方的附件条）。
+  const showText = hasText && !isPlan && !isReport;
   const attachmentsBlock = message.attachments.length > 0 ? (
     <AttachmentStrip
       attachments={message.attachments}
@@ -1387,7 +1849,7 @@ function MessageBubble({
     <div style={{ display: "flex", justifyContent: isUser ? "flex-end" : "flex-start", padding: "4px 26px 4px 20px", gap: 8 }}>
       <div style={{ maxWidth: isUser ? "62%" : "94%" }}>
         {isUser && attachmentsBlock}
-        {hasText && (
+        {showText && (
           <div style={{
             padding: isUser ? "10px 14px" : "12px 16px",
             borderRadius: isUser ? "18px 18px 6px 18px" : "18px 18px 18px 6px",
@@ -1404,56 +1866,23 @@ function MessageBubble({
             {isUser ? (
               <span style={{ whiteSpace: "pre-wrap" }}>{message.text}</span>
             ) : (
-              <div className={`prose-ai${t.isDark ? " prose-dark" : ""}`}>
-                <ReactMarkdown
-                  remarkPlugins={[remarkGfm, remarkMath]}
-                  rehypePlugins={[rehypeRaw, rehypeKatex]}
-                  components={{
-                    a: ({ href, children, ...props }) => (
-                      <a
-                        {...props}
-                        href={href}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        onClick={(e) => {
-                          e.preventDefault();
-                          if (!href) return;
-                          void openUrl(href);
-                        }}
-                      >
-                        {children}
-                      </a>
-                    ),
-                    pre: ({ children }) => <>{children}</>,
-                    code: ({ className, children, ...props }) => {
-                      const content = String(children ?? "");
-                      const isBlock =
-                        (className || "").includes("language-") || content.includes("\n");
-                      if (!isBlock) {
-                        return (
-                          <code className={className} {...props}>
-                            {children}
-                          </code>
-                        );
-                      }
-                      return (
-                        <MarkdownCodeBlock
-                          code={content.replace(/\n$/, "")}
-                          language={markdownCodeLanguage(className)}
-                          isDark={t.isDark}
-                        />
-                      );
-                    },
-                  }}
-                >
-                  {fixMarkdown(message.text)}
-                </ReactMarkdown>
-              </div>
+              <AIMarkdown text={message.text} isDark={t.isDark} />
             )}
           </div>
         )}
+        {isPlan && dr && (
+          <ResearchPlanBubble plan={dr} leadingText={hasText ? message.text : undefined} />
+        )}
+        {isReport && dr && (
+          <ResearchReportBubble report={dr} leadingText={hasText ? message.text : undefined} />
+        )}
+        {hasCanvas && message.canvas && (
+          <div style={{ marginTop: showText ? 8 : 0 }}>
+            <CanvasBubble canvas={message.canvas} mediaDir={mediaDir} />
+          </div>
+        )}
         {!isUser && attachmentsBlock}
-        <div style={{ fontSize: 11, color: t.textMuted, marginTop: hasText ? 3 : 1, textAlign: isUser ? "right" : "left", padding: "0 4px", display: "flex", gap: 4, justifyContent: isUser ? "flex-end" : "flex-start", alignItems: "center", flexWrap: "wrap" }}>
+        <div style={{ fontSize: 11, color: t.textMuted, marginTop: (showText || isPlan || isReport || hasCanvas) ? 3 : 1, textAlign: isUser ? "right" : "left", padding: "0 4px", display: "flex", gap: 4, justifyContent: isUser ? "flex-end" : "flex-start", alignItems: "center", flexWrap: "wrap" }}>
           {isUser && copyIdBtn}
           <span>{formatMsgDate(message.timestamp)} {formatMsgTime(message.timestamp)}</span>
           {!isUser && (

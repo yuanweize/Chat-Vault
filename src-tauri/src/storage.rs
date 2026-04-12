@@ -673,10 +673,14 @@ pub fn turns_to_jsonl_rows(
                     if let Some(text) = dr.get("report_text").and_then(|v| v.as_str()) {
                         if !text.is_empty() {
                             let media_id = format!("{}.md", Uuid::new_v4().to_string().replace("-", ""));
+                            let size_bytes = text.as_bytes().len();
+                            let char_count = text.chars().count();
                             let _ = std::fs::write(media_dir.join(&media_id), text.as_bytes());
                             dr.as_object_mut().map(|o| {
                                 o.remove("report_text");
                                 o.insert("report_media_id".to_string(), json!(media_id));
+                                o.insert("size_bytes".to_string(), json!(size_bytes));
+                                o.insert("char_count".to_string(), json!(char_count));
                             });
                         }
                     }
@@ -695,10 +699,14 @@ pub fn turns_to_jsonl_rows(
                             .and_then(|f| f.rsplit('.').next())
                             .unwrap_or("txt");
                         let media_id = format!("{}.{}", Uuid::new_v4().to_string().replace("-", ""), ext);
+                        let size_bytes = content.as_bytes().len();
+                        let char_count = content.chars().count();
                         let _ = std::fs::write(media_dir.join(&media_id), content.as_bytes());
                         cv.as_object_mut().map(|o| {
                             o.remove("content");
                             o.insert("content_media_id".to_string(), json!(media_id));
+                            o.insert("size_bytes".to_string(), json!(size_bytes));
+                            o.insert("char_count".to_string(), json!(char_count));
                         });
                     }
                 }
@@ -1222,6 +1230,10 @@ mod tests {
         assert_eq!(dr["type"], "report");
         assert_eq!(dr["title"], "研究报告标题");
         assert_eq!(dr["research_id"], "uuid-123");
+
+        // 大小与字符数应注入
+        assert_eq!(dr["size_bytes"], json!(report_text.as_bytes().len()));
+        assert_eq!(dr["char_count"], json!(report_text.chars().count()));
     }
 
     #[test]
@@ -1269,6 +1281,10 @@ mod tests {
 
         assert_eq!(cv["title"], "示例页面");
         assert_eq!(cv["filename"], "demo.html");
+
+        // 大小与字符数应注入
+        assert_eq!(cv["size_bytes"], json!(canvas_content.as_bytes().len()));
+        assert_eq!(cv["char_count"], json!(canvas_content.chars().count()));
     }
 
 }
