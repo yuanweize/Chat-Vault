@@ -640,13 +640,27 @@ pub fn turns_to_jsonl_rows(
             .and_then(|v| v.as_str())
             .unwrap_or("");
 
+        // Deep Research report turn：assistant 行用 ai[12][8]["57"][0][5] 的报告完成时间
+        // （user 行保持原 turn[4][0]，不受影响）。字段缺失时回落到 turn ts。
+        let model_ts = asst
+            .and_then(|a| a.get("deep_research"))
+            .and_then(|dr| {
+                if dr.get("type").and_then(|v| v.as_str()) == Some("report") {
+                    dr.get("completion_ts").and_then(|v| v.as_i64())
+                } else {
+                    None
+                }
+            })
+            .and_then(|t| to_iso_utc(Some(t)))
+            .unwrap_or_else(|| ts.clone());
+
         let mut model_row = json!({
             "type": "message",
             "id": format!("{}_m", turn_id),
             "role": "model",
             "text": asst_text,
             "attachments": asst_attachments,
-            "timestamp": ts,
+            "timestamp": model_ts,
             "model": model,
         });
 

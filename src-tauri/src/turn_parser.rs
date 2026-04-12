@@ -102,6 +102,10 @@ pub enum DeepResearch {
         document_id: Option<String>,
         #[serde(skip_serializing_if = "Option::is_none")]
         progress: Option<Vec<ResearchProgressEntry>>,
+        /// 报告完成时间 (epoch seconds)，来自 ai[12][8]["57"][0][5]。
+        /// 仅用于 assistant 消息行 timestamp 覆盖，不影响 user 行。
+        #[serde(skip_serializing_if = "Option::is_none")]
+        completion_ts: Option<i64>,
     },
 }
 
@@ -730,6 +734,7 @@ fn extract_deep_research_report(ai_data: &Value) -> Option<DeepResearch> {
         research_id: vstr(item, 3).map(|s| s.to_string()),
         document_id: vstr(item, 1).map(|s| s.to_string()),
         progress,
+        completion_ts: None, // 由 parse_turn 注入，见 ai[12][8]["57"][0][5]
     })
 }
 
@@ -1110,16 +1115,12 @@ pub fn parse_turn(turn: &Value) -> ParsedTurn {
             .or_else(|| extract_deep_research_plan(ai));
 
         // Report turn 的 turn[4][0] 是 turn 创建时间，与 plan turn 几乎一致；
-        // 真正的报告完成时间在 ai[12][8]["57"][0][5]，直接覆盖为用户感知的"消息到达时间"。
-        // 字段缺失时保留原 turn[4][0] 兜底。
-        if matches!(
-            result.assistant.deep_research,
-            Some(DeepResearch::Report { .. })
-        ) {
-            if let Some(done_ts) = extract_deep_research_completion_ts(ai) {
-                result.timestamp = Some(done_ts);
-                result.timestamp_iso = to_iso_utc(Some(done_ts));
-            }
+        // 真正的报告完成时间在 ai[12][8]["57"][0][5]，注入到 Report 里，后续仅用于
+        // 覆盖 assistant 消息行的时间，user 消息行仍保留 turn[4][0]。
+        if let Some(DeepResearch::Report { completion_ts, .. }) =
+            result.assistant.deep_research.as_mut()
+        {
+            *completion_ts = extract_deep_research_completion_ts(ai);
         }
 
         // Canvas
@@ -1606,7 +1607,7 @@ mod tests {
     }
 
     #[test]
-    fn test_report_turn_overrides_timestamp_with_completion_ts() {
+    fn test_report_turn_exposes_completion_ts_without_touching_turn_ts() {
         // 构造 ai[30][0] 报告结构（[10]=3 标记为 deep research report）
         let mut report_item = vec![Value::Null; 18];
         report_item[1] = json!("doc-uuid");
@@ -1650,17 +1651,19 @@ mod tests {
         ]);
 
         let parsed = parse_turn(&turn);
-        assert!(matches!(
-            parsed.assistant.deep_research,
-            Some(DeepResearch::Report { .. })
-        ));
-        // report turn 的时间戳应被覆盖为报告完成时间
-        assert_eq!(parsed.timestamp, Some(completion_ts));
-        assert!(parsed.timestamp_iso.is_some());
+        // turn 级时间戳保持 turn[4][0]，保证 user 消息行时间不被改动
+        assert_eq!(parsed.timestamp, Some(1700000000));
+        // 完成时间挂在 Report 里，供 storage 单独覆盖 assistant 行
+        match parsed.assistant.deep_research.as_ref().unwrap() {
+            DeepResearch::Report { completion_ts: c, .. } => {
+                assert_eq!(*c, Some(completion_ts));
+            }
+            _ => panic!("应为 Report"),
+        }
     }
 
     #[test]
-    fn test_report_turn_falls_back_when_completion_ts_missing() {
+    fn test_report_turn_completion_ts_missing() {
         // 没有 "57" 字段时保留 turn[4][0]
         let mut report_item = vec![Value::Null; 18];
         report_item[1] = json!("doc-uuid");
@@ -1685,6 +1688,10 @@ mod tests {
 
         let parsed = parse_turn(&turn);
         assert_eq!(parsed.timestamp, Some(1700000000));
+        match parsed.assistant.deep_research.as_ref().unwrap() {
+            DeepResearch::Report { completion_ts: c, .. } => assert!(c.is_none()),
+            _ => panic!("应为 Report"),
+        }
     }
 
     #[test]
@@ -1705,6 +1712,7 @@ mod tests {
                     filename: None,
                 },
             ]),
+            completion_ts: None,
         };
 
         let json_str = serde_json::to_string(&report).unwrap();
