@@ -57,6 +57,45 @@ pub struct RoleContent {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DeepResearchStep {
+    pub number: i64,
+    pub name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type")]
+pub enum DeepResearch {
+    #[serde(rename = "plan")]
+    Plan {
+        title: String,
+        steps: Vec<DeepResearchStep>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        estimated_time: Option<String>,
+    },
+    #[serde(rename = "report")]
+    Report {
+        title: String,
+        report_text: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        research_id: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        document_id: Option<String>,
+    },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Canvas {
+    pub title: String,
+    pub filename: String,
+    pub content: String,
+    pub language: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub document_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AssistantContent {
     pub text: String,
     pub thinking: String,
@@ -64,6 +103,10 @@ pub struct AssistantContent {
     pub files: Vec<MediaFile>,
     pub music_meta: Option<MusicMeta>,
     pub gen_meta: Option<GenMeta>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub deep_research: Option<DeepResearch>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub canvas: Option<Canvas>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -598,6 +641,164 @@ pub fn parse_media_item(item: &Value, role: &str) -> MediaFile {
     media
 }
 
+// ============================================================================
+// Deep Research / Canvas 解析
+// ============================================================================
+
+/// 从文件名后缀推断语言标识
+fn infer_language_from_filename(filename: &str) -> String {
+    let ext = filename.rsplit('.').next().unwrap_or("").to_lowercase();
+    match ext.as_str() {
+        "html" | "htm" => "html",
+        "css" => "css",
+        "js" => "javascript",
+        "ts" => "typescript",
+        "py" => "python",
+        "rs" => "rust",
+        "json" => "json",
+        "md" => "markdown",
+        "svg" => "svg",
+        "xml" => "xml",
+        other => other,
+    }
+    .to_string()
+}
+
+/// 从 ai_data[30] 中提取 canvas 内容的 raw 文本
+fn extract_canvas_raw_content(block8: &Value) -> Option<String> {
+    // [8] = [[[null, null, null, ["raw code text"]]]]
+    fn find_long_string(v: &Value) -> Option<String> {
+        match v {
+            Value::String(s) if s.len() > 50 => Some(s.clone()),
+            Value::Array(arr) => {
+                for item in arr {
+                    if let Some(s) = find_long_string(item) {
+                        return Some(s);
+                    }
+                }
+                None
+            }
+            _ => None,
+        }
+    }
+    find_long_string(block8)
+}
+
+/// 尝试从 ai_data 中提取 Deep Research 报告 (ai[30])
+fn extract_deep_research_report(ai_data: &Value) -> Option<DeepResearch> {
+    let block30 = vget(ai_data, 30)?;
+    let item = vget(block30, 0)?;
+
+    // [10] == 3 → deep research report
+    if vi64(item, 10) != Some(3) {
+        return None;
+    }
+
+    let title = vstr(item, 2).unwrap_or("").to_string();
+    let report_text = vstr(item, 4).unwrap_or("").to_string();
+    if report_text.is_empty() {
+        return None;
+    }
+
+    Some(DeepResearch::Report {
+        title,
+        report_text,
+        research_id: vstr(item, 3).map(|s| s.to_string()),
+        document_id: vstr(item, 1).map(|s| s.to_string()),
+    })
+}
+
+/// 尝试从 ai_data 中提取 Deep Research 计划 (ai[12][8]["56"])
+fn extract_deep_research_plan(ai_data: &Value) -> Option<DeepResearch> {
+    let block12 = vget(ai_data, 12)?;
+    let meta_dict = vget(block12, 8)?;
+    let plan_data = meta_dict.get("56")?;
+    let plan_arr = plan_data.as_array()?;
+    if plan_arr.is_empty() {
+        return None;
+    }
+
+    let title = plan_arr.first()?.as_str().unwrap_or("").to_string();
+    let steps_raw = plan_arr.get(1)?.as_array()?;
+
+    let steps: Vec<DeepResearchStep> = steps_raw
+        .iter()
+        .filter_map(|s| {
+            let s_arr = s.as_array()?;
+            let number = s_arr.first()?.as_i64()?;
+            let name = s_arr.get(1)?.as_str()?.to_string();
+            let description = s_arr.get(2).and_then(|v| v.as_str()).map(|s| s.to_string());
+            Some(DeepResearchStep {
+                number,
+                name,
+                description,
+            })
+        })
+        .collect();
+
+    if steps.is_empty() {
+        return None;
+    }
+
+    let estimated_time = plan_arr.get(2).and_then(|v| v.as_str()).map(|s| s.to_string());
+
+    Some(DeepResearch::Plan {
+        title,
+        steps,
+        estimated_time,
+    })
+}
+
+/// 尝试从 ai_data 中提取 Canvas (ai[30], [10]==2)
+fn extract_canvas(ai_data: &Value) -> Option<Canvas> {
+    let block30 = vget(ai_data, 30)?;
+    let item = vget(block30, 0)?;
+
+    // [10] == 2 → canvas
+    if vi64(item, 10) != Some(2) {
+        return None;
+    }
+
+    let title = vstr(item, 2).unwrap_or("").to_string();
+    let filename = vstr(item, 9).unwrap_or("").to_string();
+
+    // 优先从 [8] 取 raw content (无 code fence)，fallback 到 [4]
+    let content = vget(item, 8)
+        .and_then(|v| extract_canvas_raw_content(v))
+        .or_else(|| {
+            // [4] 带 code fence，需要去掉
+            vstr(item, 4).map(|s| {
+                let trimmed = s.trim();
+                // 去掉 ```lang\n...\n```
+                if trimmed.starts_with("```") {
+                    let without_first = trimmed.splitn(2, '\n').nth(1).unwrap_or(trimmed);
+                    let without_last = without_first
+                        .strip_suffix("```")
+                        .unwrap_or(without_first);
+                    without_last.trim().to_string()
+                } else {
+                    trimmed.to_string()
+                }
+            })
+        })
+        .unwrap_or_default();
+
+    if content.is_empty() {
+        return None;
+    }
+
+    let language = infer_language_from_filename(&filename);
+    let document_id = vstr(item, 1).map(|s| s.to_string());
+
+    Some(Canvas {
+        title,
+        filename,
+        content,
+        language,
+        document_id,
+    })
+}
+
 /// 解析单个对话轮次
 pub fn parse_turn(turn: &Value) -> ParsedTurn {
     let mut result = ParsedTurn {
@@ -615,6 +816,8 @@ pub fn parse_turn(turn: &Value) -> ParsedTurn {
             files: Vec::new(),
             music_meta: None,
             gen_meta: None,
+            deep_research: None,
+            canvas: None,
         },
     };
 
@@ -798,6 +1001,13 @@ pub fn parse_turn(turn: &Value) -> ParsedTurn {
         if gen_meta.is_some() {
             result.assistant.gen_meta = gen_meta;
         }
+
+        // Deep Research (report takes priority over plan)
+        result.assistant.deep_research = extract_deep_research_report(ai)
+            .or_else(|| extract_deep_research_plan(ai));
+
+        // Canvas
+        result.assistant.canvas = extract_canvas(ai);
     }
 
     result
@@ -1062,6 +1272,8 @@ mod tests {
                     ],
                     music_meta: None,
                     gen_meta: None,
+                    deep_research: None,
+                    canvas: None,
                 },
             },
             ParsedTurn {
@@ -1101,6 +1313,8 @@ mod tests {
                     ],
                     music_meta: None,
                     gen_meta: None,
+                    deep_research: None,
+                    canvas: None,
                 },
             },
         ];
@@ -1109,5 +1323,16 @@ mod tests {
         // t2 (latest) keeps both; t1 loses "a.jpg" because t2 claimed it first
         assert_eq!(turns[1].assistant.files.len(), 2);
         assert_eq!(turns[0].assistant.files.len(), 0);
+    }
+
+    #[test]
+    fn test_infer_language_from_filename() {
+        assert_eq!(infer_language_from_filename("test.html"), "html");
+        assert_eq!(infer_language_from_filename("app.js"), "javascript");
+        assert_eq!(infer_language_from_filename("main.py"), "python");
+        assert_eq!(infer_language_from_filename("lib.rs"), "rust");
+        assert_eq!(infer_language_from_filename("style.css"), "css");
+        assert_eq!(infer_language_from_filename("data.json"), "json");
+        assert_eq!(infer_language_from_filename("noext"), "noext");
     }
 }

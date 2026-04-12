@@ -20,6 +20,22 @@ export interface ConvMessage {
   thinking?: string;   // only when role=="model" and thinking exists
   genMeta?: { model?: string; prompt?: string };  // AI generated media meta
   hidden?: boolean;    // action_card messages marked by backend
+  deepResearch?: {
+    type: "plan" | "report";
+    title: string;
+    steps?: { number: number; name: string; description?: string }[];
+    estimated_time?: string;
+    report_text?: string;
+    research_id?: string;
+    document_id?: string;
+  };
+  canvas?: {
+    title: string;
+    filename: string;
+    content: string;
+    language: string;
+    document_id?: string;
+  };
 }
 
 export interface Conversation {

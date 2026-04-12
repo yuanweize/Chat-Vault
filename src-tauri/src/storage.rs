@@ -664,6 +664,16 @@ pub fn turns_to_jsonl_rows(
                 model_row["genMeta"] = gen_meta.clone();
             }
         }
+        if let Some(deep_research) = asst.and_then(|a| a.get("deep_research")) {
+            if !deep_research.is_null() {
+                model_row["deepResearch"] = deep_research.clone();
+            }
+        }
+        if let Some(canvas) = asst.and_then(|a| a.get("canvas")) {
+            if !canvas.is_null() {
+                model_row["canvas"] = canvas.clone();
+            }
+        }
         rows.push(model_row);
     }
 
