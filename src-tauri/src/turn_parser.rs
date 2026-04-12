@@ -212,7 +212,7 @@ pub fn sanitize_generation_placeholder_text(text: &str, has_attachments: bool) -
     if !has_attachments {
         return text.to_string();
     }
-    if !text.contains("_content/") || !text.contains("googleusercontent.com") {
+    if !text.contains("googleusercontent.com") {
         return text.to_string();
     }
     let kept: Vec<&str> = text
@@ -774,6 +774,18 @@ fn extract_deep_research_plan(ai_data: &Value) -> Option<DeepResearch> {
     })
 }
 
+/// 从 ai[12][8]["57"][0][5] 提取已完成报告的 server 完成时间 (epoch seconds)
+///
+/// Deep Research 的 plan turn 与 report turn 由服务端同时创建，`turn[4][0]` 只反映
+/// turn 创建时刻；真正的报告完成时间在报告入口 chip 的 timestamp 里。
+fn extract_deep_research_completion_ts(ai_data: &Value) -> Option<i64> {
+    let block12 = vget(ai_data, 12)?;
+    let meta_dict = vget(block12, 8)?;
+    let entry = meta_dict.get("57")?.as_array()?.first()?.as_array()?;
+    let ts_pair = entry.get(5)?.as_array()?;
+    ts_pair.first()?.as_i64()
+}
+
 /// 尝试从 ai_data 中提取 Deep Research 研究进度条目 (ai[12][8]["58"])
 ///
 /// 进度数据不是独立的 turn 类型，而是附着在 plan turn 和 report turn 上的元数据。
@@ -1097,6 +1109,19 @@ pub fn parse_turn(turn: &Value) -> ParsedTurn {
         result.assistant.deep_research = extract_deep_research_report(ai)
             .or_else(|| extract_deep_research_plan(ai));
 
+        // Report turn 的 turn[4][0] 是 turn 创建时间，与 plan turn 几乎一致；
+        // 真正的报告完成时间在 ai[12][8]["57"][0][5]，直接覆盖为用户感知的"消息到达时间"。
+        // 字段缺失时保留原 turn[4][0] 兜底。
+        if matches!(
+            result.assistant.deep_research,
+            Some(DeepResearch::Report { .. })
+        ) {
+            if let Some(done_ts) = extract_deep_research_completion_ts(ai) {
+                result.timestamp = Some(done_ts);
+                result.timestamp_iso = to_iso_utc(Some(done_ts));
+            }
+        }
+
         // Canvas
         result.assistant.canvas = extract_canvas(ai);
 
@@ -1282,6 +1307,11 @@ mod tests {
         // No attachments → no change
         let result2 = sanitize_generation_placeholder_text(text, false);
         assert_eq!(result2, text);
+
+        // Deep Research / Canvas 的 immersive_entry_chip 占位行也要被剔除
+        let dr_text = "我已完成调研\nhttp://googleusercontent.com/immersive_entry_chip/0\n点击查看报告";
+        let dr_result = sanitize_generation_placeholder_text(dr_text, true);
+        assert_eq!(dr_result, "我已完成调研\n点击查看报告");
     }
 
     #[test]
@@ -1573,6 +1603,88 @@ mod tests {
             }
             _ => panic!("应该返回 Plan 变体"),
         }
+    }
+
+    #[test]
+    fn test_report_turn_overrides_timestamp_with_completion_ts() {
+        // 构造 ai[30][0] 报告结构（[10]=3 标记为 deep research report）
+        let mut report_item = vec![Value::Null; 18];
+        report_item[1] = json!("doc-uuid");
+        report_item[2] = json!("报告标题");
+        report_item[3] = json!("research-uuid");
+        report_item[4] = json!("# 报告正文");
+        report_item[10] = json!(3);
+        let block30 = json!([report_item]);
+
+        // ai[12][8]["57"][0][5] = [completion_ts, nanos]
+        let completion_ts: i64 = 1700009999;
+        let entry_chip = json!([[
+            ["http://googleusercontent.com/immersive_entry_chip/0"],
+            "c_conv_research",
+            "research-uuid",
+            "报告标题",
+            "doc-uuid",
+            [completion_ts, 0],
+            null,
+            3
+        ]]);
+        let mut meta_dict = serde_json::Map::new();
+        meta_dict.insert("57".to_string(), entry_chip);
+        meta_dict.insert("70".to_string(), json!(5));
+        let mut block12 = vec![Value::Null; 9];
+        block12[8] = Value::Object(meta_dict);
+
+        let mut ai_data = vec![Value::Null; 38];
+        ai_data[0] = json!("cand_r");
+        ai_data[1] = json!(["http://googleusercontent.com/immersive_entry_chip/0"]);
+        ai_data[12] = json!(block12);
+        ai_data[30] = block30;
+
+        // turn[4][0] = 1700000000（turn 创建时间，应被覆盖）
+        let turn = json!([
+            ["conv_id", "turn_report"],
+            null,
+            [["用户提问", null, null, null, null]],
+            [[ai_data], null, null, "cand_r"],
+            [1700000000]
+        ]);
+
+        let parsed = parse_turn(&turn);
+        assert!(matches!(
+            parsed.assistant.deep_research,
+            Some(DeepResearch::Report { .. })
+        ));
+        // report turn 的时间戳应被覆盖为报告完成时间
+        assert_eq!(parsed.timestamp, Some(completion_ts));
+        assert!(parsed.timestamp_iso.is_some());
+    }
+
+    #[test]
+    fn test_report_turn_falls_back_when_completion_ts_missing() {
+        // 没有 "57" 字段时保留 turn[4][0]
+        let mut report_item = vec![Value::Null; 18];
+        report_item[1] = json!("doc-uuid");
+        report_item[2] = json!("报告标题");
+        report_item[3] = json!("research-uuid");
+        report_item[4] = json!("# 报告正文");
+        report_item[10] = json!(3);
+        let block30 = json!([report_item]);
+
+        let mut ai_data = vec![Value::Null; 38];
+        ai_data[0] = json!("cand_r");
+        ai_data[1] = json!(["占位"]);
+        ai_data[30] = block30;
+
+        let turn = json!([
+            ["conv_id", "turn_report"],
+            null,
+            [["用户提问", null, null, null, null]],
+            [[ai_data], null, null, "cand_r"],
+            [1700000000]
+        ]);
+
+        let parsed = parse_turn(&turn);
+        assert_eq!(parsed.timestamp, Some(1700000000));
     }
 
     #[test]
