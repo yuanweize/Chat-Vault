@@ -563,7 +563,7 @@ async fn open_google_login(app: tauri::AppHandle) -> Result<String, String> {
         &app,
         "google_login",
         tauri::WebviewUrl::External(
-            "https://gemini.google.com/app"
+            "https://accounts.google.com/ServiceLogin?continue=https%3A%2F%2Fgemini.google.com%2Fapp"
                 .parse()
                 .expect("invalid login URL"),
         ),
