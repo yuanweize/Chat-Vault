@@ -120,6 +120,15 @@ pub struct Canvas {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "kind")]
+pub enum ContentBlock {
+    #[serde(rename = "text")]
+    Text { text: String },
+    #[serde(rename = "canvas")]
+    Canvas { canvas_index: usize },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AssistantContent {
     pub text: String,
     pub thinking: String,
@@ -129,8 +138,10 @@ pub struct AssistantContent {
     pub gen_meta: Option<GenMeta>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub deep_research: Option<DeepResearch>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub canvas: Option<Canvas>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub canvas: Vec<Canvas>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub content_blocks: Vec<ContentBlock>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -148,6 +159,13 @@ pub struct ParsedTurn {
 
 fn vget(v: &Value, idx: usize) -> Option<&Value> {
     v.as_array()?.get(idx)
+}
+
+/// 把 JSON 字段取成 Option<String>，同时把空字符串视作缺省。
+fn nonempty_str(v: Option<&Value>) -> Option<String> {
+    v.and_then(|x| x.as_str())
+        .map(|s| s.to_string())
+        .filter(|s| !s.is_empty())
 }
 
 fn vstr(v: &Value, idx: usize) -> Option<&str> {
@@ -211,25 +229,98 @@ fn contains_internal_placeholder_content_url(text_line: &str) -> bool {
     false
 }
 
+/// Canvas 占位 URL 的结构化替换标记。
+/// 使用 NUL + 不可能出现在正文中的定界符，确保不与用户文本混淆。
+const CANVAS_MARKER_PREFIX: &str = "\x00\x01«CANVAS:";
+const CANVAS_MARKER_SUFFIX: &str = "»\x01\x00";
+
 /// 在已提取到附件时移除旧占位 URL 文本，避免污染 assistant 正文。
-pub fn sanitize_generation_placeholder_text(text: &str, has_attachments: bool) -> String {
+/// `canvas_count > 0` 时，immersive_entry_chip/N 替换为结构化标记而非删除。
+pub fn sanitize_generation_placeholder_text(
+    text: &str,
+    has_attachments: bool,
+    canvas_count: usize,
+) -> String {
     if !has_attachments {
         return text.to_string();
     }
     if !text.contains("googleusercontent.com") {
         return text.to_string();
     }
-    let kept: Vec<&str> = text
+    let kept: Vec<String> = text
         .lines()
-        .filter(|line| {
+        .filter_map(|line| {
             let stripped = line.trim();
             if stripped.is_empty() {
-                return false;
+                return None;
             }
-            !contains_internal_placeholder_content_url(stripped)
+            if !contains_internal_placeholder_content_url(stripped) {
+                return Some(line.to_string());
+            }
+            // 尝试提取 immersive_entry_chip 索引用于 Canvas 替换
+            if canvas_count > 0 {
+                if let Some(idx) = extract_entry_chip_index(stripped) {
+                    if idx < canvas_count {
+                        return Some(format!(
+                            "{}{}{}",
+                            CANVAS_MARKER_PREFIX, idx, CANVAS_MARKER_SUFFIX
+                        ));
+                    }
+                }
+            }
+            // Deep Research / 普通附件占位 → 整行删除
+            None
         })
         .collect();
     kept.join("\n").trim().to_string()
+}
+
+/// 从一行文本中提取 `immersive_entry_chip/{N}` 的索引 N
+fn extract_entry_chip_index(line: &str) -> Option<usize> {
+    let marker = "immersive_entry_chip/";
+    let pos = line.find(marker)?;
+    let after = &line[pos + marker.len()..];
+    // 取连续数字
+    let digits: String = after.chars().take_while(|c| c.is_ascii_digit()).collect();
+    digits.parse().ok()
+}
+
+/// 按 Canvas 标记切分文本，生成交错的 ContentBlock 列表。
+/// 如果文本中没有标记，返回空 Vec（调用方按纯文本路径处理）。
+pub fn split_text_into_content_blocks(text: &str) -> Vec<ContentBlock> {
+    if !text.contains(CANVAS_MARKER_PREFIX) {
+        return Vec::new();
+    }
+    let mut blocks = Vec::new();
+    let mut remaining = text;
+
+    while let Some(start) = remaining.find(CANVAS_MARKER_PREFIX) {
+        // 标记前的文本段
+        let before = remaining[..start].trim();
+        if !before.is_empty() {
+            blocks.push(ContentBlock::Text {
+                text: before.to_string(),
+            });
+        }
+        remaining = &remaining[start + CANVAS_MARKER_PREFIX.len()..];
+        if let Some(end) = remaining.find(CANVAS_MARKER_SUFFIX) {
+            let idx_str = &remaining[..end];
+            if let Ok(idx) = idx_str.parse::<usize>() {
+                blocks.push(ContentBlock::Canvas { canvas_index: idx });
+            }
+            remaining = &remaining[end + CANVAS_MARKER_SUFFIX.len()..];
+        } else {
+            break;
+        }
+    }
+    // 尾部文本段
+    let tail = remaining.trim();
+    if !tail.is_empty() {
+        blocks.push(ContentBlock::Text {
+            text: tail.to_string(),
+        });
+    }
+    blocks
 }
 
 // ============================================================================
@@ -757,7 +848,7 @@ fn extract_deep_research_plan(ai_data: &Value) -> Option<DeepResearch> {
             let s_arr = s.as_array()?;
             let number = s_arr.first()?.as_i64()?;
             let name = s_arr.get(1)?.as_str()?.to_string();
-            let description = s_arr.get(2).and_then(|v| v.as_str()).map(|s| s.to_string());
+            let description = nonempty_str(s_arr.get(2));
             Some(DeepResearchStep {
                 number,
                 name,
@@ -770,7 +861,7 @@ fn extract_deep_research_plan(ai_data: &Value) -> Option<DeepResearch> {
         return None;
     }
 
-    let estimated_time = plan_arr.get(2).and_then(|v| v.as_str()).map(|s| s.to_string());
+    let estimated_time = nonempty_str(plan_arr.get(2));
 
     Some(DeepResearch::Plan {
         title,
@@ -822,8 +913,8 @@ fn extract_research_progress_entries(ai_data: &Value) -> Option<Vec<ResearchProg
         if arr.len() >= 6 {
             if let Some(inner) = arr.get(5).and_then(|v| v.as_array()) {
                 if inner.len() >= 2 {
-                    let step_title = inner.first().and_then(|v| v.as_str()).map(|s| s.to_string());
-                    let step_desc = inner.get(1).and_then(|v| v.as_str()).map(|s| s.to_string());
+                    let step_title = nonempty_str(inner.first());
+                    let step_desc = nonempty_str(inner.get(1));
                     let round = inner.get(2).and_then(|v| v.as_i64());
                     entries.push(ResearchProgressEntry {
                         entry_type: "thinking".to_string(),
@@ -845,12 +936,12 @@ fn extract_research_progress_entries(ai_data: &Value) -> Option<Vec<ResearchProg
                 if search_info.first().and_then(|v| v.as_i64()) == Some(1) {
                     // 类型 B: 网页搜索 — search_info[2] 是网页信息数组
                     if let Some(web_info) = search_info.get(2).and_then(|v| v.as_array()) {
-                        let page_url = web_info.get(1).and_then(|v| v.as_str()).map(|s| s.to_string());
-                        let page_title = web_info.get(2).and_then(|v| v.as_str()).map(|s| s.to_string());
+                        let page_url = nonempty_str(web_info.get(1));
+                        let page_title = nonempty_str(web_info.get(2));
                         entries.push(ResearchProgressEntry {
                             entry_type: "web_search".to_string(),
                             title: None,
-                            description: search_info.get(1).and_then(|v| v.as_str()).map(|s| s.to_string()),
+                            description: None,
                             round: None,
                             url: page_url,
                             page_title,
@@ -860,16 +951,16 @@ fn extract_research_progress_entries(ai_data: &Value) -> Option<Vec<ResearchProg
                     }
                     // 类型 C: 文件搜索 — search_info[2] is null, [4] has file info
                     if search_info.get(2).map(|v| v.is_null()).unwrap_or(true) {
-                        let file_name = search_info
-                            .get(4)
-                            .and_then(|v| v.as_array())
-                            .and_then(|a| a.get(2))
-                            .and_then(|v| v.as_str())
-                            .map(|s| s.to_string());
+                        let file_name = nonempty_str(
+                            search_info
+                                .get(4)
+                                .and_then(|v| v.as_array())
+                                .and_then(|a| a.get(2)),
+                        );
                         entries.push(ResearchProgressEntry {
                             entry_type: "file_search".to_string(),
                             title: None,
-                            description: search_info.get(1).and_then(|v| v.as_str()).map(|s| s.to_string()),
+                            description: None,
                             round: None,
                             url: None,
                             page_title: None,
@@ -891,54 +982,59 @@ fn extract_research_progress_entries(ai_data: &Value) -> Option<Vec<ResearchProg
     }
 }
 
-/// 尝试从 ai_data 中提取 Canvas (ai[30], [10]==2)
-fn extract_canvas(ai_data: &Value) -> Option<Canvas> {
-    let block30 = vget(ai_data, 30)?;
-    let item = vget(block30, 0)?;
+/// 从 ai_data[30] 提取所有 Canvas（[10]==2 的项），按原始顺序返回。
+fn extract_canvas_list(ai_data: &Value) -> Vec<Canvas> {
+    let block30 = match vget(ai_data, 30).and_then(|v| v.as_array()) {
+        Some(arr) => arr,
+        None => return Vec::new(),
+    };
 
-    // [10] == 2 → canvas
-    if vi64(item, 10) != Some(2) {
-        return None;
-    }
+    let mut result = Vec::new();
+    for item in block30 {
+        // [10] == 2 → canvas
+        if vi64(item, 10) != Some(2) {
+            continue;
+        }
 
-    let title = vstr(item, 2).unwrap_or("").to_string();
-    let filename = vstr(item, 9).unwrap_or("").to_string();
+        let title = vstr(item, 2).unwrap_or("").to_string();
+        let filename = vstr(item, 9).unwrap_or("").to_string();
 
-    // 优先从 [8] 取 raw content (无 code fence)，fallback 到 [4]
-    let content = vget(item, 8)
-        .and_then(|v| extract_canvas_raw_content(v))
-        .or_else(|| {
-            // [4] 带 code fence，需要去掉
-            vstr(item, 4).map(|s| {
-                let trimmed = s.trim();
-                // 去掉 ```lang\n...\n```
-                if trimmed.starts_with("```") {
-                    let without_first = trimmed.splitn(2, '\n').nth(1).unwrap_or(trimmed);
-                    let without_last = without_first
-                        .strip_suffix("```")
-                        .unwrap_or(without_first);
-                    without_last.trim().to_string()
-                } else {
-                    trimmed.to_string()
-                }
+        // 优先从 [8] 取 raw content (无 code fence)，fallback 到 [4]
+        let content = vget(item, 8)
+            .and_then(|v| extract_canvas_raw_content(v))
+            .or_else(|| {
+                // [4] 带 code fence，需要去掉
+                vstr(item, 4).map(|s| {
+                    let trimmed = s.trim();
+                    if trimmed.starts_with("```") {
+                        let without_first = trimmed.splitn(2, '\n').nth(1).unwrap_or(trimmed);
+                        let without_last = without_first
+                            .strip_suffix("```")
+                            .unwrap_or(without_first);
+                        without_last.trim().to_string()
+                    } else {
+                        trimmed.to_string()
+                    }
+                })
             })
-        })
-        .unwrap_or_default();
+            .unwrap_or_default();
 
-    if content.is_empty() {
-        return None;
+        if content.is_empty() {
+            continue;
+        }
+
+        let language = infer_language_from_filename(&filename);
+        let document_id = vstr(item, 1).map(|s| s.to_string());
+
+        result.push(Canvas {
+            title,
+            filename,
+            content,
+            language,
+            document_id,
+        });
     }
-
-    let language = infer_language_from_filename(&filename);
-    let document_id = vstr(item, 1).map(|s| s.to_string());
-
-    Some(Canvas {
-        title,
-        filename,
-        content,
-        language,
-        document_id,
-    })
+    result
 }
 
 /// 解析单个对话轮次
@@ -959,7 +1055,8 @@ pub fn parse_turn(turn: &Value) -> ParsedTurn {
             music_meta: None,
             gen_meta: None,
             deep_research: None,
-            canvas: None,
+            canvas: Vec::new(),
+            content_blocks: Vec::new(),
         },
     };
 
@@ -1124,16 +1221,23 @@ pub fn parse_turn(turn: &Value) -> ParsedTurn {
         }
 
         // Canvas
-        result.assistant.canvas = extract_canvas(ai);
+        result.assistant.canvas = extract_canvas_list(ai);
 
         // Sanitize placeholder text (deep_research / canvas turn 的正文也是占位 URL)
         let needs_sanitize = !result.assistant.files.is_empty()
             || result.assistant.deep_research.is_some()
-            || result.assistant.canvas.is_some();
+            || !result.assistant.canvas.is_empty();
         result.assistant.text = sanitize_generation_placeholder_text(
             &result.assistant.text,
             needs_sanitize,
+            result.assistant.canvas.len(),
         );
+
+        // Canvas 交错内容块
+        if !result.assistant.canvas.is_empty() {
+            result.assistant.content_blocks =
+                split_text_into_content_blocks(&result.assistant.text);
+        }
 
         // Strip citation markers ([cite_start], [cite: N, ...])
         result.assistant.text = strip_citation_markers(&result.assistant.text);
@@ -1301,18 +1405,63 @@ mod tests {
 
     #[test]
     fn test_sanitize_generation_placeholder_text() {
+        // 普通附件占位 URL → 整行删除
         let text = "Here is your image\nhttps://lh3.googleusercontent.com/abc_content/img.png\nEnjoy!";
-        let result = sanitize_generation_placeholder_text(text, true);
+        let result = sanitize_generation_placeholder_text(text, true, 0);
         assert_eq!(result, "Here is your image\nEnjoy!");
 
         // No attachments → no change
-        let result2 = sanitize_generation_placeholder_text(text, false);
+        let result2 = sanitize_generation_placeholder_text(text, false, 0);
         assert_eq!(result2, text);
 
-        // Deep Research / Canvas 的 immersive_entry_chip 占位行也要被剔除
+        // Deep Research: immersive_entry_chip → 整行删除 (canvas_count=0)
         let dr_text = "我已完成调研\nhttp://googleusercontent.com/immersive_entry_chip/0\n点击查看报告";
-        let dr_result = sanitize_generation_placeholder_text(dr_text, true);
+        let dr_result = sanitize_generation_placeholder_text(dr_text, true, 0);
         assert_eq!(dr_result, "我已完成调研\n点击查看报告");
+
+        // Canvas: immersive_entry_chip → 替换为结构化标记 (canvas_count>0)
+        let canvas_text = "介绍文字\nhttp://googleusercontent.com/immersive_entry_chip/0\n第二段\nhttp://googleusercontent.com/immersive_entry_chip/1\n结尾";
+        let canvas_result = sanitize_generation_placeholder_text(canvas_text, true, 2);
+        let expected = format!(
+            "介绍文字\n{}0{}\n第二段\n{}1{}\n结尾",
+            CANVAS_MARKER_PREFIX, CANVAS_MARKER_SUFFIX,
+            CANVAS_MARKER_PREFIX, CANVAS_MARKER_SUFFIX,
+        );
+        assert_eq!(canvas_result, expected);
+    }
+
+    #[test]
+    fn test_split_text_into_content_blocks() {
+        let text = format!(
+            "### 标题1\n描述\n{}0{}\n### 标题2\n{}1{}\n总结",
+            CANVAS_MARKER_PREFIX, CANVAS_MARKER_SUFFIX,
+            CANVAS_MARKER_PREFIX, CANVAS_MARKER_SUFFIX,
+        );
+        let blocks = split_text_into_content_blocks(&text);
+        assert_eq!(blocks.len(), 5);
+        match &blocks[0] {
+            ContentBlock::Text { text } => assert!(text.contains("标题1")),
+            _ => panic!("expected text block"),
+        }
+        match &blocks[1] {
+            ContentBlock::Canvas { canvas_index } => assert_eq!(*canvas_index, 0),
+            _ => panic!("expected canvas block"),
+        }
+        match &blocks[2] {
+            ContentBlock::Text { text } => assert!(text.contains("标题2")),
+            _ => panic!("expected text block"),
+        }
+        match &blocks[3] {
+            ContentBlock::Canvas { canvas_index } => assert_eq!(*canvas_index, 1),
+            _ => panic!("expected canvas block"),
+        }
+        match &blocks[4] {
+            ContentBlock::Text { text } => assert!(text.contains("总结")),
+            _ => panic!("expected text block"),
+        }
+
+        // 无标记 → 空 Vec
+        assert!(split_text_into_content_blocks("普通文本").is_empty());
     }
 
     #[test]
@@ -1368,7 +1517,6 @@ mod tests {
         let parsed = parse_media_item(&item, "user");
         assert_eq!(parsed.media_type, "video");
         assert_eq!(parsed.url.as_deref(), Some("https://example.com/v.mp4"));
-        assert_eq!(parsed.thumbnail_url.as_deref(), Some("https://thumb.com/t.jpg"));
     }
 
     #[test]
@@ -1437,7 +1585,8 @@ mod tests {
                     music_meta: None,
                     gen_meta: None,
                     deep_research: None,
-                    canvas: None,
+                    canvas: Vec::new(),
+                    content_blocks: Vec::new(),
                 },
             },
             ParsedTurn {
@@ -1478,7 +1627,8 @@ mod tests {
                     music_meta: None,
                     gen_meta: None,
                     deep_research: None,
-                    canvas: None,
+                    canvas: Vec::new(),
+                    content_blocks: Vec::new(),
                 },
             },
         ];

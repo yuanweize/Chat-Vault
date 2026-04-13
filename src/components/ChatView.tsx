@@ -14,6 +14,7 @@ import { oneLight, vscDarkPlus } from "react-syntax-highlighter/dist/esm/styles/
 import { Attachment, Conversation, ConvMessage } from "../data/types";
 import { useTheme } from "../theme";
 import { CopyIcon, CheckIcon, ChevronRightIcon, DocIcon, SparkIcon, SearchIcon, ExternalLinkIcon } from "./Icons";
+import { ResearchDetailModal, ResearchModalState } from "./ResearchDetailModal";
 
 const loadedImageUrlCache = new Set<string>();
 
@@ -100,7 +101,7 @@ async function computeImageDHash(url: string, size = 8): Promise<number[] | null
 // Strategy: protect code blocks → convert all **...** to
 // <strong>...</strong> HTML (bypasses flanking entirely) → restore code.
 
-function fixMarkdown(content: string): string {
+export function fixMarkdown(content: string): string {
   let text = content
     // Strip Gemini internal iemoji: markers, keep the code value
     .replace(/iemoji:([^:\s)]{1,20})/g, "$1")
@@ -537,12 +538,12 @@ function ConversationTimeline({ messages, scrollerEl, visibleRange, onJumpTo }: 
   );
 }
 
-function markdownCodeLanguage(className?: string): string {
+export function markdownCodeLanguage(className?: string): string {
   const matched = /language-([\w-]+)/.exec(className || "");
   return matched?.[1] || "text";
 }
 
-function MarkdownCodeBlock({
+export function MarkdownCodeBlock({
   code,
   language,
   isDark,
@@ -626,7 +627,21 @@ function formatMsgTime(iso: string): string {
   }
 }
 
-function formatBytes(n: number): string {
+export function formatProgressBits(opts: {
+  rounds: number;
+  webCount: number;
+  thinkingCount: number;
+  entryCount: number;
+}): string[] {
+  const bits: string[] = [];
+  if (opts.rounds > 0) bits.push(`${opts.rounds} rounds`);
+  if (opts.webCount > 0) bits.push(`${opts.webCount.toLocaleString()} sites`);
+  if (opts.thinkingCount > 0) bits.push(`${opts.thinkingCount} thinkings`);
+  if (opts.entryCount > 0) bits.push(`${opts.entryCount.toLocaleString()} records`);
+  return bits;
+}
+
+export function formatBytes(n: number): string {
   if (!Number.isFinite(n) || n <= 0) return "0 B";
   if (n < 1024) return `${n} B`;
   if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
@@ -649,18 +664,20 @@ function formatMsgDate(iso: string): string {
 
 interface ChatViewProps {
   conversation: Conversation | null;
+  accountId?: string;
   mediaDir?: string;  // path to accounts/{id}/media/
   mediaVersion?: number;
   scrollToMessageId?: string | null;
   onScrolledToMessage?: () => void;
 }
 
-export function ChatView({ conversation, mediaDir, mediaVersion = 0, scrollToMessageId, onScrolledToMessage }: ChatViewProps) {
+export function ChatView({ conversation, accountId, mediaDir, mediaVersion = 0, scrollToMessageId, onScrolledToMessage }: ChatViewProps) {
   const t = useTheme();
   const virtuosoRef = useRef<VirtuosoHandle>(null);
   const [scrollerEl, setScrollerEl] = useState<HTMLElement | null>(null);
   const [visibleRange, setVisibleRange] = useState({ startIndex: 0, endIndex: 0 });
   const [highlightedMessageId, setHighlightedMessageId] = useState<string | null>(null);
+  const [researchModal, setResearchModal] = useState<ResearchModalState | null>(null);
   const highlightTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const scrollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const onScrolledToMessageRef = useRef(onScrolledToMessage);
@@ -765,9 +782,11 @@ export function ChatView({ conversation, mediaDir, mediaVersion = 0, scrollToMes
               itemContent={(_, msg) => (
                 <MessageBubble
                   message={msg}
+                  accountId={accountId}
                   mediaDir={mediaDir}
                   cacheKey={`${conversation.id}:${conversation.updatedAt}:${mediaVersion}`}
                   isHighlighted={msg.id === highlightedMessageId}
+                  onOpenResearch={setResearchModal}
                 />
               )}
               style={{ position: "absolute", inset: 0 }}
@@ -783,6 +802,7 @@ export function ChatView({ conversation, mediaDir, mediaVersion = 0, scrollToMes
           </div>
         );
       })()}
+      <ResearchDetailModal state={researchModal} onClose={() => setResearchModal(null)} />
     </div>
   );
 }
@@ -1449,32 +1469,32 @@ function HaloDot({ t, filled = true }: { t: ReturnType<typeof useTheme>; filled?
   );
 }
 
+type CanvasItem = NonNullable<ConvMessage["canvas"]>[number];
+
+/** Canvas 文件行：inline=true 时不带外壳（嵌入 contentBlocks 中使用）。 */
 function CanvasBubble({
   canvas,
   mediaDir,
   leadingText,
+  inline,
 }: {
-  canvas: NonNullable<ConvMessage["canvas"]>;
+  canvas: CanvasItem;
   mediaDir?: string;
   leadingText?: string;
+  inline?: boolean;
 }) {
   const t = useTheme();
   const [hovered, setHovered] = useState(false);
   const absPath = mediaDir && canvas.content_media_id ? `${mediaDir}/${canvas.content_media_id}` : "";
   const disabled = !absPath;
-  const lang = (canvas.language || "file").toUpperCase();
-  const chars = canvas.char_count ?? 0;
   const bytes = canvas.size_bytes ?? 0;
   const metaBits: string[] = [];
-  if (chars > 0) metaBits.push(`${chars.toLocaleString()} 字`);
   if (bytes > 0) metaBits.push(formatBytes(bytes));
   const metaText = metaBits.join(" · ");
-  const hasLeading = !!(leadingText && leadingText.trim().length > 0);
+  const hasLeading = !inline && !!(leadingText && leadingText.trim().length > 0);
 
   async function handleOpen() {
     if (disabled) return;
-    // 用 file:// URL 走 OS URL handler，对 .html 这类文件会落到默认浏览器；
-    // 而 openPath 走文件关联，HTML 常被 VSCode 等编辑器劫持，拦不住用户视角的"外部浏览器"。
     const fileUrl = `file://${absPath}`;
     try {
       await openUrl(fileUrl);
@@ -1491,6 +1511,60 @@ function CanvasBubble({
   const accent = t.isDark ? ACCENT_BLUE_DARK : ACCENT_BLUE;
   const rowBg = hovered && !disabled ? rowHoverBg(t) : "transparent";
 
+  const btn = (
+    <button
+      type="button"
+      onClick={handleOpen}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+      disabled={disabled}
+      title={disabled ? "media 文件缺失" : `在默认浏览器中打开 ${canvas.filename}`}
+      style={{
+        display: "flex",
+        alignItems: "center",
+        gap: 12,
+        width: "100%",
+        padding: "10px 16px",
+        border: "none",
+        borderRadius: 0,
+        background: rowBg,
+        cursor: disabled ? "default" : "pointer",
+        textAlign: "left",
+        color: t.text,
+        transition: "background 0.15s",
+        opacity: disabled ? 0.55 : 1,
+      }}
+    >
+      <div
+        style={{
+          width: 36,
+          height: 36,
+          borderRadius: 9,
+          background: t.isDark ? "rgba(124,167,255,0.12)" : "rgba(0,113,227,0.08)",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          flexShrink: 0,
+        }}
+      >
+        <DocIcon color={accent} size={18} />
+      </div>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ fontSize: 13, fontWeight: 600, color: t.text, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+          {canvas.filename || canvas.title || "canvas"}
+        </div>
+        <div style={{ fontSize: 11, color: t.textSub, marginTop: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+          {canvas.title && canvas.title !== canvas.filename ? canvas.title : ""}
+          {canvas.title && canvas.title !== canvas.filename && metaText ? " · " : ""}
+          {metaText}
+        </div>
+      </div>
+      <ExternalLinkIcon color={hovered && !disabled ? accent : t.textMuted} />
+    </button>
+  );
+
+  if (inline) return btn;
+
   return (
     <div style={aiShellStyle(t)}>
       {hasLeading && (
@@ -1498,73 +1572,7 @@ function CanvasBubble({
           <AIMarkdown text={leadingText!} isDark={t.isDark} />
         </div>
       )}
-      <button
-        type="button"
-        onClick={handleOpen}
-        onMouseEnter={() => setHovered(true)}
-        onMouseLeave={() => setHovered(false)}
-        disabled={disabled}
-        title={disabled ? "media 文件缺失" : `在默认浏览器中打开 ${canvas.filename}`}
-        style={{
-          display: "flex",
-          alignItems: "center",
-          gap: 12,
-          width: "100%",
-          padding: "12px 16px",
-          border: "none",
-          background: rowBg,
-          cursor: disabled ? "default" : "pointer",
-          textAlign: "left",
-          color: t.text,
-          transition: "background 0.15s",
-          opacity: disabled ? 0.55 : 1,
-        }}
-      >
-        {/* 语言徽标 + 文档图标叠层 */}
-        <div
-          style={{
-            position: "relative",
-            width: 36,
-            height: 36,
-            borderRadius: 9,
-            background: t.isDark ? "rgba(124,167,255,0.12)" : "rgba(0,113,227,0.08)",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            flexShrink: 0,
-          }}
-        >
-          <DocIcon color={accent} size={18} />
-          <span
-            style={{
-              position: "absolute",
-              bottom: -3,
-              right: -4,
-              fontSize: 8,
-              fontWeight: 700,
-              letterSpacing: 0.3,
-              padding: "1px 4px",
-              borderRadius: 4,
-              background: accent,
-              color: "#fff",
-              lineHeight: 1.2,
-            }}
-          >
-            {lang.slice(0, 4)}
-          </span>
-        </div>
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ fontSize: 13, fontWeight: 600, color: t.text, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-            {canvas.filename || canvas.title || "canvas"}
-          </div>
-          <div style={{ fontSize: 11, color: t.textSub, marginTop: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-            {canvas.title && canvas.title !== canvas.filename ? canvas.title : ""}
-            {canvas.title && canvas.title !== canvas.filename && metaText ? " · " : ""}
-            {metaText}
-          </div>
-        </div>
-        <ExternalLinkIcon color={hovered && !disabled ? accent : t.textMuted} />
-      </button>
+      {btn}
     </div>
   );
 }
@@ -1682,9 +1690,15 @@ function ResearchPlanBubble({
 function ResearchReportBubble({
   report,
   leadingText,
+  accountId,
+  mediaDir,
+  onOpenResearch,
 }: {
   report: NonNullable<ConvMessage["deepResearch"]>;
   leadingText?: string;
+  accountId?: string;
+  mediaDir?: string;
+  onOpenResearch?: (state: ResearchModalState) => void;
 }) {
   const t = useTheme();
   const [progressHovered, setProgressHovered] = useState(false);
@@ -1692,19 +1706,16 @@ function ResearchReportBubble({
   const accent = t.isDark ? ACCENT_BLUE_DARK : ACCENT_BLUE;
   const hasLeading = !!(leadingText && leadingText.trim().length > 0);
 
-  const progress = report.progress ?? [];
-  const rounds = progress.reduce((max, p) => {
-    if (p.type === "thinking" && typeof p.round === "number" && p.round + 1 > max) return p.round + 1;
-    return max;
-  }, 0);
-  const webCount = progress.filter((p) => p.type === "web_search").length;
-  const fileCount = progress.filter((p) => p.type === "file_search").length;
+  const rounds = report.rounds ?? 0;
+  const webCount = report.web_count ?? 0;
+  const fileCount = report.file_count ?? 0;
+  const entryCount = report.entry_count ?? 0;
   const sourceCount = webCount + fileCount;
   const progressBits: string[] = [];
   if (rounds > 0) progressBits.push(`${rounds} 轮`);
   if (sourceCount > 0) progressBits.push(`${sourceCount} 个来源`);
-  const progressMeta = progressBits.join(" · ") || `${progress.length} 条记录`;
-  const progressDisabled = progress.length === 0;
+  const progressMeta = progressBits.join(" · ") || (entryCount > 0 ? `${entryCount} 条记录` : "无调研记录");
+  const progressDisabled = !report.progress_media_id;
 
   const chars = report.char_count ?? 0;
   const bytes = report.size_bytes ?? 0;
@@ -1713,6 +1724,25 @@ function ResearchReportBubble({
   if (bytes > 0) reportBits.push(formatBytes(bytes));
   const reportMeta = reportBits.join(" · ");
   const reportDisabled = !report.report_media_id;
+
+  const openResearch = (defaultTab: "progress" | "report") => {
+    if (!accountId || !onOpenResearch) return;
+    onOpenResearch({
+      accountId,
+      mediaDir,
+      title: report.title || "研究报告",
+      reportMediaId: report.report_media_id,
+      progressMediaId: report.progress_media_id,
+      charCount: report.char_count,
+      sizeBytes: report.size_bytes,
+      rounds: report.rounds,
+      webCount: report.web_count,
+      fileCount: report.file_count,
+      thinkingCount: report.thinking_count,
+      entryCount: report.entry_count,
+      defaultTab,
+    });
+  };
 
 
   function row(opts: {
@@ -1786,16 +1816,16 @@ function ResearchReportBubble({
           <AIMarkdown text={leadingText!} isDark={t.isDark} />
         </div>
       )}
-      {row({
+      {!progressDisabled && row({
         icon: <SearchIcon color={accent} />,
         label: "调研过程",
-        main: progress.length > 0 ? progressMeta : "无调研记录",
-        meta: progress.length > 0 && progressBits.length === 2 ? `共 ${progress.length} 条记录` : "",
+        main: progressMeta,
+        meta: progressBits.length === 2 ? `共 ${entryCount} 条记录` : "",
         hovered: progressHovered,
         setHovered: setProgressHovered,
-        disabled: progressDisabled,
-        onClick: () => { /* detail view 后续迭代 */ },
-        title: progressDisabled ? "暂无调研记录" : "查看调研过程（即将支持）",
+        disabled: !accountId,
+        onClick: () => openResearch("progress"),
+        title: accountId ? "查看调研过程" : "账号信息缺失",
       })}
       {row({
         icon: <DocIcon color={accent} />,
@@ -1804,9 +1834,9 @@ function ResearchReportBubble({
         meta: reportMeta,
         hovered: reportHovered,
         setHovered: setReportHovered,
-        disabled: reportDisabled,
-        onClick: () => { /* detail view 后续迭代 */ },
-        title: reportDisabled ? "报告正文缺失" : "查看报告详情（即将支持）",
+        disabled: reportDisabled || !accountId,
+        onClick: () => openResearch("report"),
+        title: reportDisabled ? "报告正文缺失" : !accountId ? "账号信息缺失" : "查看报告详情",
       })}
     </div>
   );
@@ -1814,14 +1844,18 @@ function ResearchReportBubble({
 
 function MessageBubble({
   message,
+  accountId,
   mediaDir,
   cacheKey,
   isHighlighted,
+  onOpenResearch,
 }: {
   message: ConvMessage;
+  accountId?: string;
   mediaDir?: string;
   cacheKey: string;
   isHighlighted?: boolean;
+  onOpenResearch?: (state: ResearchModalState) => void;
 }) {
   const t = useTheme();
   const [copiedId, setCopiedId] = useState(false);
@@ -1830,9 +1864,12 @@ function MessageBubble({
   const dr = message.deepResearch;
   const isPlan = !isUser && dr?.type === "plan";
   const isReport = !isUser && dr?.type === "report";
-  const hasCanvas = !isUser && !!message.canvas;
-  // plan / report / canvas 都把正文融入自身气泡壳，外部不再单独渲染文字气泡。
-  const showText = hasText && !isPlan && !isReport && !hasCanvas;
+  const canvasList = (!isUser && message.canvas) || [];
+  const hasCanvas = canvasList.length > 0;
+  const contentBlocks = (!isUser && message.contentBlocks) || [];
+  const hasBlocks = contentBlocks.length > 0;
+  // plan / report 正文融入自身气泡壳；有 contentBlocks 时由 blocks 渲染（含交错 canvas）。
+  const showText = hasText && !isPlan && !isReport && !hasBlocks && !hasCanvas;
   const attachmentsBlock = message.attachments.length > 0 ? (
     <AttachmentStrip
       attachments={message.attachments}
@@ -1889,15 +1926,40 @@ function MessageBubble({
           <ResearchPlanBubble plan={dr} leadingText={hasText ? message.text : undefined} />
         )}
         {isReport && dr && (
-          <ResearchReportBubble report={dr} leadingText={hasText ? message.text : undefined} />
-        )}
-        {hasCanvas && message.canvas && (
-          <CanvasBubble
-            canvas={message.canvas}
-            mediaDir={mediaDir}
+          <ResearchReportBubble
+            report={dr}
             leadingText={hasText ? message.text : undefined}
+            accountId={accountId}
+            mediaDir={mediaDir}
+            onOpenResearch={onOpenResearch}
           />
         )}
+        {hasBlocks && (
+          <div style={aiShellStyle(t)}>
+            {contentBlocks.map((block, bi) =>
+              block.kind === "text" ? (
+                <div key={bi} style={{ padding: "12px 18px", fontSize: 14, lineHeight: 1.55, color: t.text, wordBreak: "break-word" }}>
+                  <AIMarkdown text={block.text} isDark={t.isDark} />
+                </div>
+              ) : canvasList[block.canvas_index] ? (
+                <CanvasBubble
+                  key={bi}
+                  canvas={canvasList[block.canvas_index]}
+                  mediaDir={mediaDir}
+                  inline
+                />
+              ) : null,
+            )}
+          </div>
+        )}
+        {hasCanvas && !hasBlocks && canvasList.map((cv, ci) => (
+          <CanvasBubble
+            key={ci}
+            canvas={cv}
+            mediaDir={mediaDir}
+            leadingText={ci === 0 && hasText ? message.text : undefined}
+          />
+        ))}
         {!isUser && attachmentsBlock}
         <div style={{ fontSize: 11, color: t.textMuted, marginTop: (showText || isPlan || isReport || hasCanvas) ? 3 : 1, textAlign: isUser ? "right" : "left", padding: "0 4px", display: "flex", gap: 4, justifyContent: isUser ? "flex-end" : "flex-start", alignItems: "center", flexWrap: "wrap" }}>
           {isUser && copyIdBtn}

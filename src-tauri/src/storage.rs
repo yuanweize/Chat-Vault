@@ -698,33 +698,81 @@ pub fn turns_to_jsonl_rows(
                             });
                         }
                     }
+                    // 调研过程外置到 JSON media 文件，并注入统计字段
+                    if let Some(entries) = dr.get("progress").and_then(|v| v.as_array()).cloned() {
+                        if !entries.is_empty() {
+                            let entry_count = entries.len();
+                            let mut rounds: i64 = 0;
+                            let mut thinking_count: usize = 0;
+                            let mut web_count: usize = 0;
+                            let mut file_count: usize = 0;
+                            for e in &entries {
+                                match e.get("type").and_then(|v| v.as_str()) {
+                                    Some("thinking") => {
+                                        thinking_count += 1;
+                                        if let Some(r) = e.get("round").and_then(|v| v.as_i64()) {
+                                            if r + 1 > rounds { rounds = r + 1; }
+                                        }
+                                    }
+                                    Some("web_search") => web_count += 1,
+                                    Some("file_search") => file_count += 1,
+                                    _ => {}
+                                }
+                            }
+                            let payload = Value::Array(entries);
+                            let serialized = serde_json::to_vec(&payload).unwrap_or_else(|_| b"[]".to_vec());
+                            let media_id = format!("{}.json", Uuid::new_v4().to_string().replace("-", ""));
+                            let size_bytes = serialized.len();
+                            let _ = std::fs::write(media_dir.join(&media_id), &serialized);
+                            dr.as_object_mut().map(|o| {
+                                o.remove("progress");
+                                o.insert("progress_media_id".to_string(), json!(media_id));
+                                o.insert("progress_size_bytes".to_string(), json!(size_bytes));
+                                o.insert("entry_count".to_string(), json!(entry_count));
+                                o.insert("rounds".to_string(), json!(rounds));
+                                o.insert("thinking_count".to_string(), json!(thinking_count));
+                                o.insert("web_count".to_string(), json!(web_count));
+                                o.insert("file_count".to_string(), json!(file_count));
+                            });
+                        }
+                    }
                 }
                 model_row["deepResearch"] = dr;
             }
         }
-        if let Some(canvas) = asst.and_then(|a| a.get("canvas")) {
-            if !canvas.is_null() {
-                let mut cv = canvas.clone();
-                // Canvas 代码内容外置到 media 文件
-                if let Some(content) = cv.get("content").and_then(|v| v.as_str()) {
-                    if !content.is_empty() {
-                        let ext = cv.get("filename")
-                            .and_then(|v| v.as_str())
-                            .and_then(|f| f.rsplit('.').next())
-                            .unwrap_or("txt");
-                        let media_id = format!("{}.{}", Uuid::new_v4().to_string().replace("-", ""), ext);
-                        let size_bytes = content.as_bytes().len();
-                        let char_count = content.chars().count();
-                        let _ = std::fs::write(media_dir.join(&media_id), content.as_bytes());
-                        cv.as_object_mut().map(|o| {
-                            o.remove("content");
-                            o.insert("content_media_id".to_string(), json!(media_id));
-                            o.insert("size_bytes".to_string(), json!(size_bytes));
-                            o.insert("char_count".to_string(), json!(char_count));
-                        });
+        if let Some(canvas_arr) = asst.and_then(|a| a.get("canvas")).and_then(|v| v.as_array()) {
+            if !canvas_arr.is_empty() {
+                let mut externalized: Vec<Value> = Vec::new();
+                for canvas in canvas_arr {
+                    let mut cv = canvas.clone();
+                    // Canvas 代码内容外置到 media 文件
+                    if let Some(content) = cv.get("content").and_then(|v| v.as_str()) {
+                        if !content.is_empty() {
+                            let ext = cv.get("filename")
+                                .and_then(|v| v.as_str())
+                                .and_then(|f| f.rsplit('.').next())
+                                .unwrap_or("txt");
+                            let media_id = format!("{}.{}", Uuid::new_v4().to_string().replace("-", ""), ext);
+                            let size_bytes = content.as_bytes().len();
+                            let char_count = content.chars().count();
+                            let _ = std::fs::write(media_dir.join(&media_id), content.as_bytes());
+                            cv.as_object_mut().map(|o| {
+                                o.remove("content");
+                                o.insert("content_media_id".to_string(), json!(media_id));
+                                o.insert("size_bytes".to_string(), json!(size_bytes));
+                                o.insert("char_count".to_string(), json!(char_count));
+                            });
+                        }
                     }
+                    externalized.push(cv);
                 }
-                model_row["canvas"] = cv;
+                model_row["canvas"] = json!(externalized);
+            }
+        }
+        // content_blocks 直接透传（已由 turn_parser 生成）
+        if let Some(blocks) = asst.and_then(|a| a.get("content_blocks")).and_then(|v| v.as_array()) {
+            if !blocks.is_empty() {
+                model_row["contentBlocks"] = json!(blocks);
             }
         }
         rows.push(model_row);
@@ -1256,23 +1304,39 @@ mod tests {
         let media_dir = tmp_dir.path().join("media");
         std::fs::create_dir_all(&media_dir).unwrap();
 
-        let canvas_content = "<!DOCTYPE html><html><body><h1>Hello</h1></body></html>";
+        let canvas_content_a = "<!DOCTYPE html><html><body><h1>Page A</h1></body></html>";
+        let canvas_content_b = "<!DOCTYPE html><html><body><h1>Page B</h1></body></html>";
         let turn = json!({
             "turn_id": "t2",
             "timestamp": 1700000000,
-            "user": { "text": "做一个网页", "files": [] },
+            "user": { "text": "做两个网页", "files": [] },
             "assistant": {
                 "text": "已创建",
                 "thinking": "",
                 "model": "gemini-2.0",
                 "files": [],
-                "canvas": {
-                    "title": "示例页面",
-                    "filename": "demo.html",
-                    "content": canvas_content,
-                    "language": "html",
-                    "document_id": "doc-789"
-                }
+                "canvas": [
+                    {
+                        "title": "页面A",
+                        "filename": "page-a.html",
+                        "content": canvas_content_a,
+                        "language": "html",
+                        "document_id": "doc-a"
+                    },
+                    {
+                        "title": "页面B",
+                        "filename": "page-b.html",
+                        "content": canvas_content_b,
+                        "language": "html",
+                        "document_id": "doc-b"
+                    }
+                ],
+                "content_blocks": [
+                    {"kind": "text", "text": "介绍"},
+                    {"kind": "canvas", "canvas_index": 0},
+                    {"kind": "text", "text": "中间段"},
+                    {"kind": "canvas", "canvas_index": 1}
+                ]
             }
         });
 
@@ -1284,21 +1348,124 @@ mod tests {
         );
 
         let model_row = &rows[2];
-        let cv = model_row.get("canvas").unwrap();
+        let cv_arr = model_row.get("canvas").unwrap().as_array().unwrap();
+        assert_eq!(cv_arr.len(), 2);
 
-        assert!(cv.get("content").is_none(), "content 不应在 JSONL 中");
-        let media_id = cv.get("content_media_id").and_then(|v| v.as_str()).unwrap();
-        assert!(media_id.ends_with(".html"));
+        // 第一个 canvas
+        let cv0 = &cv_arr[0];
+        assert!(cv0.get("content").is_none(), "content 不应在 JSONL 中");
+        let media_id_a = cv0.get("content_media_id").and_then(|v| v.as_str()).unwrap();
+        assert!(media_id_a.ends_with(".html"));
+        let file_a = std::fs::read_to_string(media_dir.join(media_id_a)).unwrap();
+        assert_eq!(file_a, canvas_content_a);
+        assert_eq!(cv0["title"], "页面A");
+        assert_eq!(cv0["size_bytes"], json!(canvas_content_a.as_bytes().len()));
 
-        let file_content = std::fs::read_to_string(media_dir.join(media_id)).unwrap();
-        assert_eq!(file_content, canvas_content);
+        // 第二个 canvas
+        let cv1 = &cv_arr[1];
+        let media_id_b = cv1.get("content_media_id").and_then(|v| v.as_str()).unwrap();
+        let file_b = std::fs::read_to_string(media_dir.join(media_id_b)).unwrap();
+        assert_eq!(file_b, canvas_content_b);
+        assert_eq!(cv1["title"], "页面B");
 
-        assert_eq!(cv["title"], "示例页面");
-        assert_eq!(cv["filename"], "demo.html");
-
-        // 大小与字符数应注入
-        assert_eq!(cv["size_bytes"], json!(canvas_content.as_bytes().len()));
-        assert_eq!(cv["char_count"], json!(canvas_content.chars().count()));
+        // contentBlocks 应透传
+        let blocks = model_row.get("contentBlocks").unwrap().as_array().unwrap();
+        assert_eq!(blocks.len(), 4);
+        assert_eq!(blocks[0]["kind"], "text");
+        assert_eq!(blocks[1]["kind"], "canvas");
+        assert_eq!(blocks[1]["canvas_index"], 0);
     }
 
+    #[test]
+    fn test_turns_to_jsonl_externalizes_research_progress() {
+        let tmp_dir = tempfile::tempdir().unwrap();
+        let media_dir = tmp_dir.path().join("media");
+        std::fs::create_dir_all(&media_dir).unwrap();
+
+        let progress = json!([
+            { "type": "thinking", "title": "规划第一轮", "description": "思考...", "round": 0 },
+            { "type": "web_search", "url": "https://a.example.com", "page_title": "A" },
+            { "type": "web_search", "url": "https://b.example.com", "page_title": "B" },
+            { "type": "thinking", "title": "规划第二轮", "description": "继续思考...", "round": 1 },
+            { "type": "file_search", "filename": "notes.pdf" }
+        ]);
+        let turn = json!({
+            "turn_id": "t3",
+            "timestamp": 1700000000,
+            "user": { "text": "研究问题", "files": [] },
+            "assistant": {
+                "text": "已生成报告",
+                "thinking": "",
+                "model": "gemini-2.0",
+                "files": [],
+                "deep_research": {
+                    "type": "report",
+                    "title": "报告",
+                    "report_text": "# 报告正文",
+                    "progress": progress.clone()
+                }
+            }
+        });
+
+        let rows = turns_to_jsonl_rows(
+            &[turn],
+            "conv_3", "account_1", "测试对话",
+            &json!({}),
+            &media_dir,
+        );
+
+        let dr = rows[2].get("deepResearch").unwrap();
+        // 原 progress 数组应被移除
+        assert!(dr.get("progress").is_none(), "progress 数组不应在 JSONL 中");
+
+        // media 文件存在且内容等于原数组
+        let media_id = dr.get("progress_media_id").and_then(|v| v.as_str()).unwrap();
+        assert!(media_id.ends_with(".json"));
+        let content = std::fs::read_to_string(media_dir.join(media_id)).unwrap();
+        let parsed: Value = serde_json::from_str(&content).unwrap();
+        assert_eq!(parsed, progress);
+
+        // 统计字段正确
+        assert_eq!(dr["entry_count"], json!(5));
+        assert_eq!(dr["rounds"], json!(2));
+        assert_eq!(dr["thinking_count"], json!(2));
+        assert_eq!(dr["web_count"], json!(2));
+        assert_eq!(dr["file_count"], json!(1));
+        assert!(dr.get("progress_size_bytes").and_then(|v| v.as_u64()).unwrap() > 0);
+    }
+
+    #[test]
+    fn test_report_without_progress_has_no_progress_fields() {
+        let tmp_dir = tempfile::tempdir().unwrap();
+        let media_dir = tmp_dir.path().join("media");
+        std::fs::create_dir_all(&media_dir).unwrap();
+
+        let turn = json!({
+            "turn_id": "t4",
+            "timestamp": 1700000000,
+            "user": { "text": "q", "files": [] },
+            "assistant": {
+                "text": "a",
+                "thinking": "",
+                "model": "gemini-2.0",
+                "files": [],
+                "deep_research": {
+                    "type": "report",
+                    "title": "报告",
+                    "report_text": "正文"
+                }
+            }
+        });
+
+        let rows = turns_to_jsonl_rows(
+            &[turn],
+            "conv_4", "account_1", "测试",
+            &json!({}),
+            &media_dir,
+        );
+        let dr = rows[2].get("deepResearch").unwrap();
+        assert!(dr.get("progress_media_id").is_none());
+        assert!(dr.get("entry_count").is_none());
+        assert!(dr.get("rounds").is_none());
+    }
 }

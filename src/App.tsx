@@ -1109,7 +1109,7 @@ function App() {
               await loadSummaries(accountId);
             }}
           />
-          <ChatView conversation={selectedConversation} mediaDir={mediaDir} mediaVersion={mediaVersion} scrollToMessageId={scrollToMessageId} onScrolledToMessage={handleScrolledToMessage} />
+          <ChatView conversation={selectedConversation} accountId={currentAccount?.id} mediaDir={mediaDir} mediaVersion={mediaVersion} scrollToMessageId={scrollToMessageId} onScrolledToMessage={handleScrolledToMessage} />
         </div>
       </div>
       {showExportModal && exportStats && (

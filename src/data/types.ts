@@ -25,20 +25,19 @@ export interface ConvMessage {
     title: string;
     steps?: { number: number; name: string; description?: string }[];
     estimated_time?: string;
-    progress?: {
-      type: "thinking" | "web_search" | "file_search";
-      title?: string;
-      description?: string;
-      round?: number;
-      url?: string;
-      page_title?: string;
-      filename?: string;
-    }[];
     report_media_id?: string;  // media file id, load via read_media_file
     research_id?: string;
     document_id?: string;
     size_bytes?: number;   // report media file byte size
     char_count?: number;   // report text char count
+    // 调研过程：数组外置为 JSON media 文件，JSONL 中只留摘要统计
+    progress_media_id?: string;
+    progress_size_bytes?: number;
+    entry_count?: number;
+    rounds?: number;
+    thinking_count?: number;
+    web_count?: number;
+    file_count?: number;
   };
   canvas?: {
     title: string;
@@ -48,7 +47,11 @@ export interface ConvMessage {
     document_id?: string;
     size_bytes?: number;   // canvas media file byte size
     char_count?: number;   // canvas content char count
-  };
+  }[];
+  contentBlocks?: (
+    | { kind: "text"; text: string }
+    | { kind: "canvas"; canvas_index: number }
+  )[];
 }
 
 export interface Conversation {
