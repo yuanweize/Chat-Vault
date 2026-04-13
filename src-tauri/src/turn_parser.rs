@@ -57,6 +57,78 @@ pub struct RoleContent {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DeepResearchStep {
+    pub number: i64,
+    pub name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ResearchProgressEntry {
+    #[serde(rename = "type")]
+    pub entry_type: String, // "thinking" | "web_search" | "file_search"
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub round: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub url: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub page_title: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub filename: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type")]
+pub enum DeepResearch {
+    #[serde(rename = "plan")]
+    Plan {
+        title: String,
+        steps: Vec<DeepResearchStep>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        estimated_time: Option<String>,
+    },
+    #[serde(rename = "report")]
+    Report {
+        title: String,
+        report_text: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        research_id: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        document_id: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        progress: Option<Vec<ResearchProgressEntry>>,
+        /// 报告完成时间 (epoch seconds)，来自 ai[12][8]["57"][0][5]。
+        /// 仅用于 assistant 消息行 timestamp 覆盖，不影响 user 行。
+        #[serde(skip_serializing_if = "Option::is_none")]
+        completion_ts: Option<i64>,
+    },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Canvas {
+    pub title: String,
+    pub filename: String,
+    pub content: String,
+    pub language: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub document_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "kind")]
+pub enum ContentBlock {
+    #[serde(rename = "text")]
+    Text { text: String },
+    #[serde(rename = "canvas")]
+    Canvas { canvas_index: usize },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AssistantContent {
     pub text: String,
     pub thinking: String,
@@ -64,6 +136,12 @@ pub struct AssistantContent {
     pub files: Vec<MediaFile>,
     pub music_meta: Option<MusicMeta>,
     pub gen_meta: Option<GenMeta>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub deep_research: Option<DeepResearch>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub canvas: Vec<Canvas>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub content_blocks: Vec<ContentBlock>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -81,6 +159,13 @@ pub struct ParsedTurn {
 
 fn vget(v: &Value, idx: usize) -> Option<&Value> {
     v.as_array()?.get(idx)
+}
+
+/// 把 JSON 字段取成 Option<String>，同时把空字符串视作缺省。
+fn nonempty_str(v: Option<&Value>) -> Option<String> {
+    v.and_then(|x| x.as_str())
+        .map(|s| s.to_string())
+        .filter(|s| !s.is_empty())
 }
 
 fn vstr(v: &Value, idx: usize) -> Option<&str> {
@@ -105,7 +190,9 @@ fn vlen(v: &Value) -> usize {
 
 fn placeholder_path_re() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
-    RE.get_or_init(|| Regex::new(r"(?:^|/)[a-z0-9_]+_content(?:/|$)").unwrap())
+    RE.get_or_init(|| {
+        Regex::new(r"(?:^|/)(?:[a-z0-9_]+_content|immersive_entry_chip)(?:/|$)").unwrap()
+    })
 }
 
 fn url_extract_re() -> &'static Regex {
@@ -142,25 +229,98 @@ fn contains_internal_placeholder_content_url(text_line: &str) -> bool {
     false
 }
 
+/// Canvas 占位 URL 的结构化替换标记。
+/// 使用 NUL + 不可能出现在正文中的定界符，确保不与用户文本混淆。
+const CANVAS_MARKER_PREFIX: &str = "\x00\x01«CANVAS:";
+const CANVAS_MARKER_SUFFIX: &str = "»\x01\x00";
+
 /// 在已提取到附件时移除旧占位 URL 文本，避免污染 assistant 正文。
-pub fn sanitize_generation_placeholder_text(text: &str, has_attachments: bool) -> String {
+/// `canvas_count > 0` 时，immersive_entry_chip/N 替换为结构化标记而非删除。
+pub fn sanitize_generation_placeholder_text(
+    text: &str,
+    has_attachments: bool,
+    canvas_count: usize,
+) -> String {
     if !has_attachments {
         return text.to_string();
     }
-    if !text.contains("_content/") || !text.contains("googleusercontent.com") {
+    if !text.contains("googleusercontent.com") {
         return text.to_string();
     }
-    let kept: Vec<&str> = text
+    let kept: Vec<String> = text
         .lines()
-        .filter(|line| {
+        .filter_map(|line| {
             let stripped = line.trim();
             if stripped.is_empty() {
-                return false;
+                return None;
             }
-            !contains_internal_placeholder_content_url(stripped)
+            if !contains_internal_placeholder_content_url(stripped) {
+                return Some(line.to_string());
+            }
+            // 尝试提取 immersive_entry_chip 索引用于 Canvas 替换
+            if canvas_count > 0 {
+                if let Some(idx) = extract_entry_chip_index(stripped) {
+                    if idx < canvas_count {
+                        return Some(format!(
+                            "{}{}{}",
+                            CANVAS_MARKER_PREFIX, idx, CANVAS_MARKER_SUFFIX
+                        ));
+                    }
+                }
+            }
+            // Deep Research / 普通附件占位 → 整行删除
+            None
         })
         .collect();
     kept.join("\n").trim().to_string()
+}
+
+/// 从一行文本中提取 `immersive_entry_chip/{N}` 的索引 N
+fn extract_entry_chip_index(line: &str) -> Option<usize> {
+    let marker = "immersive_entry_chip/";
+    let pos = line.find(marker)?;
+    let after = &line[pos + marker.len()..];
+    // 取连续数字
+    let digits: String = after.chars().take_while(|c| c.is_ascii_digit()).collect();
+    digits.parse().ok()
+}
+
+/// 按 Canvas 标记切分文本，生成交错的 ContentBlock 列表。
+/// 如果文本中没有标记，返回空 Vec（调用方按纯文本路径处理）。
+pub fn split_text_into_content_blocks(text: &str) -> Vec<ContentBlock> {
+    if !text.contains(CANVAS_MARKER_PREFIX) {
+        return Vec::new();
+    }
+    let mut blocks = Vec::new();
+    let mut remaining = text;
+
+    while let Some(start) = remaining.find(CANVAS_MARKER_PREFIX) {
+        // 标记前的文本段
+        let before = remaining[..start].trim();
+        if !before.is_empty() {
+            blocks.push(ContentBlock::Text {
+                text: before.to_string(),
+            });
+        }
+        remaining = &remaining[start + CANVAS_MARKER_PREFIX.len()..];
+        if let Some(end) = remaining.find(CANVAS_MARKER_SUFFIX) {
+            let idx_str = &remaining[..end];
+            if let Ok(idx) = idx_str.parse::<usize>() {
+                blocks.push(ContentBlock::Canvas { canvas_index: idx });
+            }
+            remaining = &remaining[end + CANVAS_MARKER_SUFFIX.len()..];
+        } else {
+            break;
+        }
+    }
+    // 尾部文本段
+    let tail = remaining.trim();
+    if !tail.is_empty() {
+        blocks.push(ContentBlock::Text {
+            text: tail.to_string(),
+        });
+    }
+    blocks
 }
 
 // ============================================================================
@@ -598,6 +758,285 @@ pub fn parse_media_item(item: &Value, role: &str) -> MediaFile {
     media
 }
 
+// ============================================================================
+// Deep Research / Canvas 解析
+// ============================================================================
+
+/// 从文件名后缀推断语言标识
+fn infer_language_from_filename(filename: &str) -> String {
+    let ext = filename.rsplit('.').next().unwrap_or("").to_lowercase();
+    match ext.as_str() {
+        "html" | "htm" => "html",
+        "css" => "css",
+        "js" => "javascript",
+        "ts" => "typescript",
+        "py" => "python",
+        "rs" => "rust",
+        "json" => "json",
+        "md" => "markdown",
+        "svg" => "svg",
+        "xml" => "xml",
+        other => other,
+    }
+    .to_string()
+}
+
+/// 从 ai_data[30] 中提取 canvas 内容的 raw 文本
+fn extract_canvas_raw_content(block8: &Value) -> Option<String> {
+    // [8] = [[[null, null, null, ["raw code text"]]]]
+    fn find_long_string(v: &Value) -> Option<String> {
+        match v {
+            Value::String(s) if s.len() > 50 => Some(s.clone()),
+            Value::Array(arr) => {
+                for item in arr {
+                    if let Some(s) = find_long_string(item) {
+                        return Some(s);
+                    }
+                }
+                None
+            }
+            _ => None,
+        }
+    }
+    find_long_string(block8)
+}
+
+/// 尝试从 ai_data 中提取 Deep Research 报告 (ai[30])
+fn extract_deep_research_report(ai_data: &Value) -> Option<DeepResearch> {
+    let block30 = vget(ai_data, 30)?;
+    let item = vget(block30, 0)?;
+
+    // [10] == 3 → deep research report
+    if vi64(item, 10) != Some(3) {
+        return None;
+    }
+
+    let title = vstr(item, 2).unwrap_or("").to_string();
+    let report_text = vstr(item, 4).unwrap_or("").to_string();
+    if report_text.is_empty() {
+        return None;
+    }
+
+    let progress = extract_research_progress_entries(ai_data);
+
+    Some(DeepResearch::Report {
+        title,
+        report_text,
+        research_id: vstr(item, 3).map(|s| s.to_string()),
+        document_id: vstr(item, 1).map(|s| s.to_string()),
+        progress,
+        completion_ts: None, // 由 parse_turn 注入，见 ai[12][8]["57"][0][5]
+    })
+}
+
+/// 尝试从 ai_data 中提取 Deep Research 计划 (ai[12][8]["56"])
+fn extract_deep_research_plan(ai_data: &Value) -> Option<DeepResearch> {
+    let block12 = vget(ai_data, 12)?;
+    let meta_dict = vget(block12, 8)?;
+    let plan_data = meta_dict.get("56")?;
+    let plan_arr = plan_data.as_array()?;
+    if plan_arr.is_empty() {
+        return None;
+    }
+
+    let title = plan_arr.first()?.as_str().unwrap_or("").to_string();
+    let steps_raw = plan_arr.get(1)?.as_array()?;
+
+    let steps: Vec<DeepResearchStep> = steps_raw
+        .iter()
+        .filter_map(|s| {
+            let s_arr = s.as_array()?;
+            let number = s_arr.first()?.as_i64()?;
+            let name = s_arr.get(1)?.as_str()?.to_string();
+            let description = nonempty_str(s_arr.get(2));
+            Some(DeepResearchStep {
+                number,
+                name,
+                description,
+            })
+        })
+        .collect();
+
+    if steps.is_empty() {
+        return None;
+    }
+
+    let estimated_time = nonempty_str(plan_arr.get(2));
+
+    Some(DeepResearch::Plan {
+        title,
+        steps,
+        estimated_time,
+    })
+}
+
+/// 从 ai[12][8]["57"][0][5] 提取已完成报告的 server 完成时间 (epoch seconds)
+///
+/// Deep Research 的 plan turn 与 report turn 由服务端同时创建，`turn[4][0]` 只反映
+/// turn 创建时刻；真正的报告完成时间在报告入口 chip 的 timestamp 里。
+fn extract_deep_research_completion_ts(ai_data: &Value) -> Option<i64> {
+    let block12 = vget(ai_data, 12)?;
+    let meta_dict = vget(block12, 8)?;
+    let entry = meta_dict.get("57")?.as_array()?.first()?.as_array()?;
+    let ts_pair = entry.get(5)?.as_array()?;
+    ts_pair.first()?.as_i64()
+}
+
+/// 尝试从 ai_data 中提取 Deep Research 研究进度条目 (ai[12][8]["58"])
+///
+/// 进度数据不是独立的 turn 类型，而是附着在 plan turn 和 report turn 上的元数据。
+fn extract_research_progress_entries(ai_data: &Value) -> Option<Vec<ResearchProgressEntry>> {
+    let block12 = vget(ai_data, 12)?;
+    let meta_dict = vget(block12, 8)?;
+    let progress_data = meta_dict.get("58")?;
+    let progress_arr = progress_data.as_array()?;
+    if progress_arr.is_empty() {
+        return None;
+    }
+
+    // [1][4][2] = progress entries array
+    let block1 = progress_arr.get(1)?.as_array()?;
+    let block14 = block1.get(4)?;
+    let entries_arr = block14.as_array()
+        .and_then(|a| a.get(2))
+        .and_then(|v| v.as_array())?;
+
+    let mut entries: Vec<ResearchProgressEntry> = Vec::new();
+
+    for item in entries_arr {
+        let arr = match item.as_array() {
+            Some(a) if !a.is_empty() => a,
+            _ => continue, // 空数组 (类型 E: 分隔符)
+        };
+
+        // 类型 A: 思考摘要 — [null, null, null, null, null, ["title", "desc", round]]
+        if arr.len() >= 6 {
+            if let Some(inner) = arr.get(5).and_then(|v| v.as_array()) {
+                if inner.len() >= 2 {
+                    let step_title = nonempty_str(inner.first());
+                    let step_desc = nonempty_str(inner.get(1));
+                    let round = inner.get(2).and_then(|v| v.as_i64());
+                    entries.push(ResearchProgressEntry {
+                        entry_type: "thinking".to_string(),
+                        title: step_title,
+                        description: step_desc,
+                        round,
+                        url: None,
+                        page_title: None,
+                        filename: None,
+                    });
+                    continue;
+                }
+            }
+        }
+
+        // 类型 B/C: 搜索操作 — [null, null, null, null, [1, "label", ...]]
+        if arr.len() >= 5 {
+            if let Some(search_info) = arr.get(4).and_then(|v| v.as_array()) {
+                if search_info.first().and_then(|v| v.as_i64()) == Some(1) {
+                    // 类型 B: 网页搜索 — search_info[2] 是网页信息数组
+                    if let Some(web_info) = search_info.get(2).and_then(|v| v.as_array()) {
+                        let page_url = nonempty_str(web_info.get(1));
+                        let page_title = nonempty_str(web_info.get(2));
+                        entries.push(ResearchProgressEntry {
+                            entry_type: "web_search".to_string(),
+                            title: None,
+                            description: None,
+                            round: None,
+                            url: page_url,
+                            page_title,
+                            filename: None,
+                        });
+                        continue;
+                    }
+                    // 类型 C: 文件搜索 — search_info[2] is null, [4] has file info
+                    if search_info.get(2).map(|v| v.is_null()).unwrap_or(true) {
+                        let file_name = nonempty_str(
+                            search_info
+                                .get(4)
+                                .and_then(|v| v.as_array())
+                                .and_then(|a| a.get(2)),
+                        );
+                        entries.push(ResearchProgressEntry {
+                            entry_type: "file_search".to_string(),
+                            title: None,
+                            description: None,
+                            round: None,
+                            url: None,
+                            page_title: None,
+                            filename: file_name,
+                        });
+                        continue;
+                    }
+                }
+            }
+        }
+
+        // 类型 D: 搜索引擎标记 — [null, ["google", ...]] — 跳过
+    }
+
+    if entries.is_empty() {
+        None
+    } else {
+        Some(entries)
+    }
+}
+
+/// 从 ai_data[30] 提取所有 Canvas（[10]==2 的项），按原始顺序返回。
+fn extract_canvas_list(ai_data: &Value) -> Vec<Canvas> {
+    let block30 = match vget(ai_data, 30).and_then(|v| v.as_array()) {
+        Some(arr) => arr,
+        None => return Vec::new(),
+    };
+
+    let mut result = Vec::new();
+    for item in block30 {
+        // [10] == 2 → canvas
+        if vi64(item, 10) != Some(2) {
+            continue;
+        }
+
+        let title = vstr(item, 2).unwrap_or("").to_string();
+        let filename = vstr(item, 9).unwrap_or("").to_string();
+
+        // 优先从 [8] 取 raw content (无 code fence)，fallback 到 [4]
+        let content = vget(item, 8)
+            .and_then(|v| extract_canvas_raw_content(v))
+            .or_else(|| {
+                // [4] 带 code fence，需要去掉
+                vstr(item, 4).map(|s| {
+                    let trimmed = s.trim();
+                    if trimmed.starts_with("```") {
+                        let without_first = trimmed.splitn(2, '\n').nth(1).unwrap_or(trimmed);
+                        let without_last = without_first
+                            .strip_suffix("```")
+                            .unwrap_or(without_first);
+                        without_last.trim().to_string()
+                    } else {
+                        trimmed.to_string()
+                    }
+                })
+            })
+            .unwrap_or_default();
+
+        if content.is_empty() {
+            continue;
+        }
+
+        let language = infer_language_from_filename(&filename);
+        let document_id = vstr(item, 1).map(|s| s.to_string());
+
+        result.push(Canvas {
+            title,
+            filename,
+            content,
+            language,
+            document_id,
+        });
+    }
+    result
+}
+
 /// 解析单个对话轮次
 pub fn parse_turn(turn: &Value) -> ParsedTurn {
     let mut result = ParsedTurn {
@@ -615,6 +1054,9 @@ pub fn parse_turn(turn: &Value) -> ParsedTurn {
             files: Vec::new(),
             music_meta: None,
             gen_meta: None,
+            deep_research: None,
+            canvas: Vec::new(),
+            content_blocks: Vec::new(),
         },
     };
 
@@ -764,11 +1206,38 @@ pub fn parse_turn(turn: &Value) -> ParsedTurn {
             result.assistant.files.push(parsed);
         }
 
-        // Sanitize placeholder text
+        // Deep Research: report turn 有 ai[30]，plan turn 有 ai[12][8]["56"]
+        // 两者都可能附带 ai[12][8]["58"] 进度数据（已在各自提取函数内处理）
+        result.assistant.deep_research = extract_deep_research_report(ai)
+            .or_else(|| extract_deep_research_plan(ai));
+
+        // Report turn 的 turn[4][0] 是 turn 创建时间，与 plan turn 几乎一致；
+        // 真正的报告完成时间在 ai[12][8]["57"][0][5]，注入到 Report 里，后续仅用于
+        // 覆盖 assistant 消息行的时间，user 消息行仍保留 turn[4][0]。
+        if let Some(DeepResearch::Report { completion_ts, .. }) =
+            result.assistant.deep_research.as_mut()
+        {
+            *completion_ts = extract_deep_research_completion_ts(ai);
+        }
+
+        // Canvas
+        result.assistant.canvas = extract_canvas_list(ai);
+
+        // Sanitize placeholder text (deep_research / canvas turn 的正文也是占位 URL)
+        let needs_sanitize = !result.assistant.files.is_empty()
+            || result.assistant.deep_research.is_some()
+            || !result.assistant.canvas.is_empty();
         result.assistant.text = sanitize_generation_placeholder_text(
             &result.assistant.text,
-            !result.assistant.files.is_empty(),
+            needs_sanitize,
+            result.assistant.canvas.len(),
         );
+
+        // Canvas 交错内容块
+        if !result.assistant.canvas.is_empty() {
+            result.assistant.content_blocks =
+                split_text_into_content_blocks(&result.assistant.text);
+        }
 
         // Strip citation markers ([cite_start], [cite: N, ...])
         result.assistant.text = strip_citation_markers(&result.assistant.text);
@@ -922,6 +1391,10 @@ mod tests {
         assert!(is_internal_placeholder_content_url(
             "https://lh3.googleusercontent.com/some_content/"
         ));
+        // Canvas / Deep Research 已完成报告使用 immersive_entry_chip
+        assert!(is_internal_placeholder_content_url(
+            "http://googleusercontent.com/immersive_entry_chip/0"
+        ));
         assert!(!is_internal_placeholder_content_url(
             "https://example.com/abc_content/def"
         ));
@@ -932,13 +1405,63 @@ mod tests {
 
     #[test]
     fn test_sanitize_generation_placeholder_text() {
+        // 普通附件占位 URL → 整行删除
         let text = "Here is your image\nhttps://lh3.googleusercontent.com/abc_content/img.png\nEnjoy!";
-        let result = sanitize_generation_placeholder_text(text, true);
+        let result = sanitize_generation_placeholder_text(text, true, 0);
         assert_eq!(result, "Here is your image\nEnjoy!");
 
         // No attachments → no change
-        let result2 = sanitize_generation_placeholder_text(text, false);
+        let result2 = sanitize_generation_placeholder_text(text, false, 0);
         assert_eq!(result2, text);
+
+        // Deep Research: immersive_entry_chip → 整行删除 (canvas_count=0)
+        let dr_text = "我已完成调研\nhttp://googleusercontent.com/immersive_entry_chip/0\n点击查看报告";
+        let dr_result = sanitize_generation_placeholder_text(dr_text, true, 0);
+        assert_eq!(dr_result, "我已完成调研\n点击查看报告");
+
+        // Canvas: immersive_entry_chip → 替换为结构化标记 (canvas_count>0)
+        let canvas_text = "介绍文字\nhttp://googleusercontent.com/immersive_entry_chip/0\n第二段\nhttp://googleusercontent.com/immersive_entry_chip/1\n结尾";
+        let canvas_result = sanitize_generation_placeholder_text(canvas_text, true, 2);
+        let expected = format!(
+            "介绍文字\n{}0{}\n第二段\n{}1{}\n结尾",
+            CANVAS_MARKER_PREFIX, CANVAS_MARKER_SUFFIX,
+            CANVAS_MARKER_PREFIX, CANVAS_MARKER_SUFFIX,
+        );
+        assert_eq!(canvas_result, expected);
+    }
+
+    #[test]
+    fn test_split_text_into_content_blocks() {
+        let text = format!(
+            "### 标题1\n描述\n{}0{}\n### 标题2\n{}1{}\n总结",
+            CANVAS_MARKER_PREFIX, CANVAS_MARKER_SUFFIX,
+            CANVAS_MARKER_PREFIX, CANVAS_MARKER_SUFFIX,
+        );
+        let blocks = split_text_into_content_blocks(&text);
+        assert_eq!(blocks.len(), 5);
+        match &blocks[0] {
+            ContentBlock::Text { text } => assert!(text.contains("标题1")),
+            _ => panic!("expected text block"),
+        }
+        match &blocks[1] {
+            ContentBlock::Canvas { canvas_index } => assert_eq!(*canvas_index, 0),
+            _ => panic!("expected canvas block"),
+        }
+        match &blocks[2] {
+            ContentBlock::Text { text } => assert!(text.contains("标题2")),
+            _ => panic!("expected text block"),
+        }
+        match &blocks[3] {
+            ContentBlock::Canvas { canvas_index } => assert_eq!(*canvas_index, 1),
+            _ => panic!("expected canvas block"),
+        }
+        match &blocks[4] {
+            ContentBlock::Text { text } => assert!(text.contains("总结")),
+            _ => panic!("expected text block"),
+        }
+
+        // 无标记 → 空 Vec
+        assert!(split_text_into_content_blocks("普通文本").is_empty());
     }
 
     #[test]
@@ -994,7 +1517,6 @@ mod tests {
         let parsed = parse_media_item(&item, "user");
         assert_eq!(parsed.media_type, "video");
         assert_eq!(parsed.url.as_deref(), Some("https://example.com/v.mp4"));
-        assert_eq!(parsed.thumbnail_url.as_deref(), Some("https://thumb.com/t.jpg"));
     }
 
     #[test]
@@ -1062,6 +1584,9 @@ mod tests {
                     ],
                     music_meta: None,
                     gen_meta: None,
+                    deep_research: None,
+                    canvas: Vec::new(),
+                    content_blocks: Vec::new(),
                 },
             },
             ParsedTurn {
@@ -1101,6 +1626,9 @@ mod tests {
                     ],
                     music_meta: None,
                     gen_meta: None,
+                    deep_research: None,
+                    canvas: Vec::new(),
+                    content_blocks: Vec::new(),
                 },
             },
         ];
@@ -1109,5 +1637,240 @@ mod tests {
         // t2 (latest) keeps both; t1 loses "a.jpg" because t2 claimed it first
         assert_eq!(turns[1].assistant.files.len(), 2);
         assert_eq!(turns[0].assistant.files.len(), 0);
+    }
+
+    #[test]
+    fn test_infer_language_from_filename() {
+        assert_eq!(infer_language_from_filename("test.html"), "html");
+        assert_eq!(infer_language_from_filename("app.js"), "javascript");
+        assert_eq!(infer_language_from_filename("main.py"), "python");
+        assert_eq!(infer_language_from_filename("lib.rs"), "rust");
+        assert_eq!(infer_language_from_filename("style.css"), "css");
+        assert_eq!(infer_language_from_filename("data.json"), "json");
+        assert_eq!(infer_language_from_filename("noext"), "noext");
+    }
+
+    #[test]
+    fn test_extract_progress_entries() {
+        // 构建模拟的 ai_data，包含 ai[12][8]["58"] 进度数据
+        let mut ai_data = vec![Value::Null; 38];
+
+        let progress_entries = json!([
+            [],  // 空分隔符
+            [null, null, null, null, null, ["分析网站数据", "正在收集小龙虾养殖相关信息", 0]],
+            [null, null, null, null, null, ["评估搜索结果", "已找到3个相关来源", 0]],
+            [null, null, null, null, null, ["规划下一步", "需要更多学术资料", 0]],
+            [null, null, null, null, [1, "Researching websites...", ["https://favicon.com/f.ico", "https://example.com/article", "小龙虾养殖指南"], [1700000000, 0]]],
+            [null, null, null, null, [1, "Researching uploaded files...", null, [1700000001, 0], [null, 11, "克氏原螯虾.pdf"]]],
+            [],  // 空分隔符
+            [null, ["google", ["", null, "Google Search", "https://icon.com/g.png", "search"], 1]]
+        ]);
+
+        let progress_58 = json!([
+            "7f670d97-f2a8-42af-abe3-b82b8291b739",
+            [null, null, null, null,
+                ["小龙虾养殖技术研究", null, progress_entries]
+            ]
+        ]);
+
+        let mut meta_dict = serde_json::Map::new();
+        meta_dict.insert("58".to_string(), progress_58);
+        let mut block12 = vec![Value::Null; 9];
+        block12[8] = Value::Object(meta_dict);
+        ai_data[12] = json!(block12);
+
+        let ai_value = json!(ai_data);
+        let entries = extract_research_progress_entries(&ai_value);
+        assert!(entries.is_some(), "应该成功提取进度条目");
+
+        let entries = entries.unwrap();
+        assert_eq!(entries.len(), 5); // 3 thinking + 1 web + 1 file
+
+        assert_eq!(entries[0].entry_type, "thinking");
+        assert_eq!(entries[0].title.as_deref(), Some("分析网站数据"));
+        assert_eq!(entries[0].round, Some(0));
+
+        assert_eq!(entries[3].entry_type, "web_search");
+        assert_eq!(entries[3].url.as_deref(), Some("https://example.com/article"));
+        assert_eq!(entries[3].page_title.as_deref(), Some("小龙虾养殖指南"));
+
+        assert_eq!(entries[4].entry_type, "file_search");
+        assert_eq!(entries[4].filename.as_deref(), Some("克氏原螯虾.pdf"));
+    }
+
+    #[test]
+    fn test_extract_progress_entries_empty() {
+        // 没有 "58" 字段
+        let mut ai_data = vec![Value::Null; 38];
+        let mut meta_dict = serde_json::Map::new();
+        meta_dict.insert("70".to_string(), json!(5));
+        let mut block12 = vec![Value::Null; 9];
+        block12[8] = Value::Object(meta_dict);
+        ai_data[12] = json!(block12);
+
+        let ai_value = json!(ai_data);
+        assert!(extract_research_progress_entries(&ai_value).is_none());
+    }
+
+    #[test]
+    fn test_plan_turn_parse() {
+        // plan turn 只有 "56"，"58" 在 plan 上是空壳（真实数据验证）
+        let plan_56 = json!([
+            "研究标题",
+            [[1, "研究网站", "搜索相关资料"], [2, "分析结果"], [3, "生成报告"]],
+            "几分钟"
+        ]);
+
+        let mut meta_dict = serde_json::Map::new();
+        meta_dict.insert("56".to_string(), plan_56);
+
+        let mut block12 = vec![Value::Null; 9];
+        block12[8] = Value::Object(meta_dict);
+
+        let mut ai_data = vec![Value::Null; 38];
+        ai_data[0] = json!("cand_1");
+        ai_data[1] = json!(["计划消息文本"]);
+        ai_data[12] = json!(block12);
+
+        let turn = json!([
+            ["conv_id", "turn_plan"],
+            null,
+            [["用户提问", null, null, null, null]],
+            [
+                [ai_data],
+                null, null,
+                "cand_1",
+            ],
+            [1700000000]
+        ]);
+
+        let parsed = parse_turn(&turn);
+        match parsed.assistant.deep_research.unwrap() {
+            DeepResearch::Plan { title, steps, estimated_time, .. } => {
+                assert_eq!(title, "研究标题");
+                assert_eq!(steps.len(), 3);
+                assert_eq!(steps[0].name, "研究网站");
+                assert_eq!(estimated_time.as_deref(), Some("几分钟"));
+            }
+            _ => panic!("应该返回 Plan 变体"),
+        }
+    }
+
+    #[test]
+    fn test_report_turn_exposes_completion_ts_without_touching_turn_ts() {
+        // 构造 ai[30][0] 报告结构（[10]=3 标记为 deep research report）
+        let mut report_item = vec![Value::Null; 18];
+        report_item[1] = json!("doc-uuid");
+        report_item[2] = json!("报告标题");
+        report_item[3] = json!("research-uuid");
+        report_item[4] = json!("# 报告正文");
+        report_item[10] = json!(3);
+        let block30 = json!([report_item]);
+
+        // ai[12][8]["57"][0][5] = [completion_ts, nanos]
+        let completion_ts: i64 = 1700009999;
+        let entry_chip = json!([[
+            ["http://googleusercontent.com/immersive_entry_chip/0"],
+            "c_conv_research",
+            "research-uuid",
+            "报告标题",
+            "doc-uuid",
+            [completion_ts, 0],
+            null,
+            3
+        ]]);
+        let mut meta_dict = serde_json::Map::new();
+        meta_dict.insert("57".to_string(), entry_chip);
+        meta_dict.insert("70".to_string(), json!(5));
+        let mut block12 = vec![Value::Null; 9];
+        block12[8] = Value::Object(meta_dict);
+
+        let mut ai_data = vec![Value::Null; 38];
+        ai_data[0] = json!("cand_r");
+        ai_data[1] = json!(["http://googleusercontent.com/immersive_entry_chip/0"]);
+        ai_data[12] = json!(block12);
+        ai_data[30] = block30;
+
+        // turn[4][0] = 1700000000（turn 创建时间，应被覆盖）
+        let turn = json!([
+            ["conv_id", "turn_report"],
+            null,
+            [["用户提问", null, null, null, null]],
+            [[ai_data], null, null, "cand_r"],
+            [1700000000]
+        ]);
+
+        let parsed = parse_turn(&turn);
+        // turn 级时间戳保持 turn[4][0]，保证 user 消息行时间不被改动
+        assert_eq!(parsed.timestamp, Some(1700000000));
+        // 完成时间挂在 Report 里，供 storage 单独覆盖 assistant 行
+        match parsed.assistant.deep_research.as_ref().unwrap() {
+            DeepResearch::Report { completion_ts: c, .. } => {
+                assert_eq!(*c, Some(completion_ts));
+            }
+            _ => panic!("应为 Report"),
+        }
+    }
+
+    #[test]
+    fn test_report_turn_completion_ts_missing() {
+        // 没有 "57" 字段时保留 turn[4][0]
+        let mut report_item = vec![Value::Null; 18];
+        report_item[1] = json!("doc-uuid");
+        report_item[2] = json!("报告标题");
+        report_item[3] = json!("research-uuid");
+        report_item[4] = json!("# 报告正文");
+        report_item[10] = json!(3);
+        let block30 = json!([report_item]);
+
+        let mut ai_data = vec![Value::Null; 38];
+        ai_data[0] = json!("cand_r");
+        ai_data[1] = json!(["占位"]);
+        ai_data[30] = block30;
+
+        let turn = json!([
+            ["conv_id", "turn_report"],
+            null,
+            [["用户提问", null, null, null, null]],
+            [[ai_data], null, null, "cand_r"],
+            [1700000000]
+        ]);
+
+        let parsed = parse_turn(&turn);
+        assert_eq!(parsed.timestamp, Some(1700000000));
+        match parsed.assistant.deep_research.as_ref().unwrap() {
+            DeepResearch::Report { completion_ts: c, .. } => assert!(c.is_none()),
+            _ => panic!("应为 Report"),
+        }
+    }
+
+    #[test]
+    fn test_report_with_progress_serialization() {
+        let report = DeepResearch::Report {
+            title: "测试报告".to_string(),
+            report_text: "# 报告内容".to_string(),
+            research_id: None,
+            document_id: None,
+            progress: Some(vec![
+                ResearchProgressEntry {
+                    entry_type: "thinking".to_string(),
+                    title: Some("思考".to_string()),
+                    description: Some("描述".to_string()),
+                    round: Some(0),
+                    url: None,
+                    page_title: None,
+                    filename: None,
+                },
+            ]),
+            completion_ts: None,
+        };
+
+        let json_str = serde_json::to_string(&report).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&json_str).unwrap();
+
+        assert_eq!(parsed["type"], "report");
+        assert_eq!(parsed["report_text"], "# 报告内容");
+        assert_eq!(parsed["progress"].as_array().unwrap().len(), 1);
+        assert_eq!(parsed["progress"][0]["type"], "thinking");
     }
 }

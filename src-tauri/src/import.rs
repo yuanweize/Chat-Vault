@@ -29,46 +29,105 @@ fn find_account_dir_in_zip(tmp_dir: &Path) -> Result<PathBuf, String> {
     Err("ZIP 中未找到有效账号数据（应包含 conversations/ 目录或 meta.json）".to_string())
 }
 
-fn merge_conversations_index(src_dir: &Path, target_dir: &Path) -> Result<(), String> {
+/// 从 JSONL 文件的 meta 行构建一条索引条目
+fn summary_from_jsonl_meta(jsonl_file: &Path) -> Option<serde_json::Value> {
+    let raw = std::fs::read_to_string(jsonl_file).ok()?;
+    let mut meta: Option<serde_json::Value> = None;
+    let mut message_count: usize = 0;
+    let mut has_media = false;
+    let mut image_count: usize = 0;
+    let mut video_count: usize = 0;
+    let mut last_text = String::new();
+
+    for line in raw.lines() {
+        let s = line.trim();
+        if s.is_empty() { continue; }
+        let obj: serde_json::Value = match serde_json::from_str(s) {
+            Ok(v) => v,
+            Err(_) => continue,
+        };
+        match obj.get("type").and_then(|v| v.as_str()) {
+            Some("meta") => { if meta.is_none() { meta = Some(obj); } }
+            Some("message") => {
+                if obj.get("hidden").and_then(|v| v.as_bool()).unwrap_or(false) { continue; }
+                message_count += 1;
+                if let Some(text) = obj.get("text").and_then(|v| v.as_str()) {
+                    if !text.is_empty() { last_text = text.to_string(); }
+                }
+                if let Some(atts) = obj.get("attachments").and_then(|v| v.as_array()) {
+                    for att in atts {
+                        let mime = att.get("mimeType").and_then(|v| v.as_str()).unwrap_or("");
+                        if mime.starts_with("image/") { image_count += 1; has_media = true; }
+                        else if mime.starts_with("video/") { video_count += 1; has_media = true; }
+                        else if !mime.is_empty() { has_media = true; }
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    let meta = meta?;
+    let id = meta.get("id").and_then(|v| v.as_str())?.to_string();
+    let title = meta.get("title").and_then(|v| v.as_str()).unwrap_or("").to_string();
+    let updated_at = meta.get("updatedAt").and_then(|v| v.as_str()).unwrap_or("").to_string();
+    let created_at = meta.get("createdAt").and_then(|v| v.as_str()).unwrap_or("").to_string();
+    let remote_hash = meta.get("remoteHash").cloned().unwrap_or(serde_json::Value::Null);
+    let last_msg: String = last_text.chars().take(80).collect();
+
+    Some(serde_json::json!({
+        "id": id,
+        "title": title,
+        "lastMessage": last_msg,
+        "messageCount": message_count,
+        "hasMedia": has_media,
+        "imageCount": image_count,
+        "videoCount": video_count,
+        "updatedAt": updated_at,
+        "createdAt": created_at,
+        "remoteHash": remote_hash,
+    }))
+}
+
+/// 从目标目录中所有 JSONL 文件重建 conversations.json 索引
+fn rebuild_conversations_index(target_dir: &Path) -> Result<(), String> {
+    let target_conv_dir = target_dir.join("conversations");
     let target_conv_file = target_dir.join("conversations.json");
 
-    let mut existing_items: Vec<serde_json::Value> = if target_conv_file.exists() {
-        let raw = std::fs::read_to_string(&target_conv_file).str_err()?;
-        serde_json::from_str::<serde_json::Value>(&raw)
-            .ok()
-            .and_then(|v| v.get("items").and_then(|a| a.as_array()).cloned())
-            .unwrap_or_default()
-    } else {
-        Vec::new()
-    };
+    let mut items: std::collections::HashMap<String, serde_json::Value> = std::collections::HashMap::new();
 
-    let src_conv_file = src_dir.join("conversations.json");
-    if src_conv_file.exists() {
-        let raw = std::fs::read_to_string(&src_conv_file).str_err()?;
-        if let Some(src_items) = serde_json::from_str::<serde_json::Value>(&raw)
-            .ok()
-            .and_then(|v| v.get("items").and_then(|a| a.as_array()).cloned())
-        {
-            for item in src_items {
-                let id = item.get("id").and_then(|v| v.as_str()).unwrap_or("").to_string();
-                if id.is_empty() { continue; }
-                if let Some(pos) = existing_items.iter().position(|e| {
-                    e.get("id").and_then(|v| v.as_str()) == Some(id.as_str())
-                }) {
-                    let existing_updated = existing_items[pos]
-                        .get("updatedAt").and_then(|v| v.as_str()).unwrap_or("");
-                    let src_updated = item.get("updatedAt").and_then(|v| v.as_str()).unwrap_or("");
-                    if src_updated > existing_updated {
-                        existing_items[pos] = item;
+    // 先加载已有索引
+    if target_conv_file.exists() {
+        if let Ok(raw) = std::fs::read_to_string(&target_conv_file) {
+            if let Some(existing) = serde_json::from_str::<serde_json::Value>(&raw)
+                .ok()
+                .and_then(|v| v.get("items").and_then(|a| a.as_array()).cloned())
+            {
+                for item in existing {
+                    if let Some(id) = item.get("id").and_then(|v| v.as_str()) {
+                        items.insert(id.to_string(), item);
                     }
-                } else {
-                    existing_items.push(item);
                 }
             }
         }
     }
 
-    let out = serde_json::json!({ "items": existing_items });
+    // 从所有 JSONL 文件重建/更新条目
+    if target_conv_dir.exists() {
+        for entry in std::fs::read_dir(&target_conv_dir).str_err()? {
+            let entry = entry.str_err()?;
+            let path = entry.path();
+            if !storage::is_jsonl_file(&path) { continue; }
+            if let Some(summary) = summary_from_jsonl_meta(&path) {
+                if let Some(id) = summary.get("id").and_then(|v| v.as_str()) {
+                    items.insert(id.to_string(), summary);
+                }
+            }
+        }
+    }
+
+    let items_vec: Vec<serde_json::Value> = items.into_values().collect();
+    let out = serde_json::json!({ "items": items_vec });
     std::fs::write(&target_conv_file, serde_json::to_string_pretty(&out).str_err()?)
         .str_err()
 }
@@ -180,7 +239,7 @@ fn do_import(src_dir: &Path, target_dir: &Path) -> Result<String, String> {
         }
     }
 
-    merge_conversations_index(src_dir, target_dir)?;
+    rebuild_conversations_index(target_dir)?;
 
     serde_json::to_string(&serde_json::json!({
         "importedConversations": imported_convs,

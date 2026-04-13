@@ -8,6 +8,14 @@
     "core:window:allow-start-dragging",
     "dialog:default",
     "opener:default",
+    {
+      "identifier": "opener:allow-open-url",
+      "allow": [{ "url": "file://**" }]
+    },
+    {
+      "identifier": "opener:allow-open-path",
+      "allow": [{ "path": "$APPDATA/**" }]
+    },
     "log:default"
   ]
 }
