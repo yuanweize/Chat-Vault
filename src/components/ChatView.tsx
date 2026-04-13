@@ -1452,9 +1452,11 @@ function HaloDot({ t, filled = true }: { t: ReturnType<typeof useTheme>; filled?
 function CanvasBubble({
   canvas,
   mediaDir,
+  leadingText,
 }: {
   canvas: NonNullable<ConvMessage["canvas"]>;
   mediaDir?: string;
+  leadingText?: string;
 }) {
   const t = useTheme();
   const [hovered, setHovered] = useState(false);
@@ -1467,89 +1469,103 @@ function CanvasBubble({
   if (chars > 0) metaBits.push(`${chars.toLocaleString()} 字`);
   if (bytes > 0) metaBits.push(formatBytes(bytes));
   const metaText = metaBits.join(" · ");
+  const hasLeading = !!(leadingText && leadingText.trim().length > 0);
 
   async function handleOpen() {
     if (disabled) return;
+    // 用 file:// URL 走 OS URL handler，对 .html 这类文件会落到默认浏览器；
+    // 而 openPath 走文件关联，HTML 常被 VSCode 等编辑器劫持，拦不住用户视角的"外部浏览器"。
+    const fileUrl = `file://${absPath}`;
     try {
-      await openPath(absPath);
+      await openUrl(fileUrl);
     } catch (err) {
-      console.error("openPath failed:", err);
+      console.error("openUrl(file://) failed, fallback to openPath:", err);
+      try {
+        await openPath(absPath);
+      } catch (err2) {
+        console.error("openPath fallback failed:", err2);
+      }
     }
   }
 
   const accent = t.isDark ? ACCENT_BLUE_DARK : ACCENT_BLUE;
+  const rowBg = hovered && !disabled ? rowHoverBg(t) : "transparent";
 
   return (
-    <button
-      type="button"
-      onClick={handleOpen}
-      onMouseEnter={() => setHovered(true)}
-      onMouseLeave={() => setHovered(false)}
-      disabled={disabled}
-      title={disabled ? "media 文件缺失" : `在系统默认应用中打开 ${canvas.filename}`}
-      style={{
-        display: "flex",
-        alignItems: "center",
-        gap: 10,
-        width: "100%",
-        padding: "8px 12px 8px 10px",
-        borderRadius: 12,
-        border: "none",
-        background: hovered && !disabled
-          ? (t.isDark ? "rgba(255,255,255,0.08)" : "rgba(255,255,255,0.62)")
-          : (t.isDark ? "rgba(255,255,255,0.04)" : "rgba(255,255,255,0.38)"),
-        cursor: disabled ? "default" : "pointer",
-        textAlign: "left",
-        color: t.text,
-        transition: "background 0.15s",
-        opacity: disabled ? 0.55 : 1,
-      }}
-    >
-      {/* 语言徽标 + 文档图标叠层 */}
-      <div
+    <div style={aiShellStyle(t)}>
+      {hasLeading && (
+        <div style={{ padding: "14px 18px 8px", fontSize: 14, lineHeight: 1.55, color: t.text, wordBreak: "break-word" }}>
+          <AIMarkdown text={leadingText!} isDark={t.isDark} />
+        </div>
+      )}
+      <button
+        type="button"
+        onClick={handleOpen}
+        onMouseEnter={() => setHovered(true)}
+        onMouseLeave={() => setHovered(false)}
+        disabled={disabled}
+        title={disabled ? "media 文件缺失" : `在默认浏览器中打开 ${canvas.filename}`}
         style={{
-          position: "relative",
-          width: 36,
-          height: 36,
-          borderRadius: 9,
-          background: t.isDark ? "rgba(124,167,255,0.12)" : "rgba(0,113,227,0.08)",
           display: "flex",
           alignItems: "center",
-          justifyContent: "center",
-          flexShrink: 0,
+          gap: 12,
+          width: "100%",
+          padding: "12px 16px",
+          border: "none",
+          background: rowBg,
+          cursor: disabled ? "default" : "pointer",
+          textAlign: "left",
+          color: t.text,
+          transition: "background 0.15s",
+          opacity: disabled ? 0.55 : 1,
         }}
       >
-        <DocIcon color={accent} size={18} />
-        <span
+        {/* 语言徽标 + 文档图标叠层 */}
+        <div
           style={{
-            position: "absolute",
-            bottom: -3,
-            right: -4,
-            fontSize: 8,
-            fontWeight: 700,
-            letterSpacing: 0.3,
-            padding: "1px 4px",
-            borderRadius: 4,
-            background: accent,
-            color: "#fff",
-            lineHeight: 1.2,
+            position: "relative",
+            width: 36,
+            height: 36,
+            borderRadius: 9,
+            background: t.isDark ? "rgba(124,167,255,0.12)" : "rgba(0,113,227,0.08)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            flexShrink: 0,
           }}
         >
-          {lang.slice(0, 4)}
-        </span>
-      </div>
-      <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ fontSize: 13, fontWeight: 600, color: t.text, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-          {canvas.filename || canvas.title || "canvas"}
+          <DocIcon color={accent} size={18} />
+          <span
+            style={{
+              position: "absolute",
+              bottom: -3,
+              right: -4,
+              fontSize: 8,
+              fontWeight: 700,
+              letterSpacing: 0.3,
+              padding: "1px 4px",
+              borderRadius: 4,
+              background: accent,
+              color: "#fff",
+              lineHeight: 1.2,
+            }}
+          >
+            {lang.slice(0, 4)}
+          </span>
         </div>
-        <div style={{ fontSize: 11, color: t.textSub, marginTop: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-          {canvas.title && canvas.title !== canvas.filename ? canvas.title : ""}
-          {canvas.title && canvas.title !== canvas.filename && metaText ? " · " : ""}
-          {metaText}
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ fontSize: 13, fontWeight: 600, color: t.text, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+            {canvas.filename || canvas.title || "canvas"}
+          </div>
+          <div style={{ fontSize: 11, color: t.textSub, marginTop: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+            {canvas.title && canvas.title !== canvas.filename ? canvas.title : ""}
+            {canvas.title && canvas.title !== canvas.filename && metaText ? " · " : ""}
+            {metaText}
+          </div>
         </div>
-      </div>
-      <ExternalLinkIcon color={hovered && !disabled ? accent : t.textMuted} />
-    </button>
+        <ExternalLinkIcon color={hovered && !disabled ? accent : t.textMuted} />
+      </button>
+    </div>
   );
 }
 
@@ -1815,9 +1831,8 @@ function MessageBubble({
   const isPlan = !isUser && dr?.type === "plan";
   const isReport = !isUser && dr?.type === "report";
   const hasCanvas = !isUser && !!message.canvas;
-  // plan/report 把文字融入同一个气泡壳内，不再单独渲染文字气泡。
-  // canvas 仍保留上方文字气泡（canvas 自身是下方的附件条）。
-  const showText = hasText && !isPlan && !isReport;
+  // plan / report / canvas 都把正文融入自身气泡壳，外部不再单独渲染文字气泡。
+  const showText = hasText && !isPlan && !isReport && !hasCanvas;
   const attachmentsBlock = message.attachments.length > 0 ? (
     <AttachmentStrip
       attachments={message.attachments}
@@ -1877,9 +1892,11 @@ function MessageBubble({
           <ResearchReportBubble report={dr} leadingText={hasText ? message.text : undefined} />
         )}
         {hasCanvas && message.canvas && (
-          <div style={{ marginTop: showText ? 8 : 0 }}>
-            <CanvasBubble canvas={message.canvas} mediaDir={mediaDir} />
-          </div>
+          <CanvasBubble
+            canvas={message.canvas}
+            mediaDir={mediaDir}
+            leadingText={hasText ? message.text : undefined}
+          />
         )}
         {!isUser && attachmentsBlock}
         <div style={{ fontSize: 11, color: t.textMuted, marginTop: (showText || isPlan || isReport || hasCanvas) ? 3 : 1, textAlign: isUser ? "right" : "left", padding: "0 4px", display: "flex", gap: 4, justifyContent: isUser ? "flex-end" : "flex-start", alignItems: "center", flexWrap: "wrap" }}>
