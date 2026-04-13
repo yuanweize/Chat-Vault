@@ -1373,59 +1373,69 @@ function LightboxModal({
 // aiBubbleBg、同圆角、同阴影）；Canvas 做成消息下方的"附件条"。所有可点击区域
 // 去明显 border，仅 hover 时用 Apple 蓝极淡 tint，不做 scale 形变。
 
-const ACCENT_BLUE = "#0071e3";
-const ACCENT_BLUE_DARK = "#9cc9ff";
+export const ACCENT_BLUE = "#0071e3";
+export const ACCENT_BLUE_DARK = "#9cc9ff";
 
-// AI markdown 正文渲染（复用于 AI 气泡、plan/report 气泡内部 header）
-function AIMarkdown({ text, isDark }: { text: string; isDark: boolean }) {
+export function AIMarkdown({
+  text,
+  isDark,
+  extraComponents,
+}: {
+  text: string;
+  isDark: boolean;
+  extraComponents?: React.ComponentProps<typeof ReactMarkdown>["components"];
+}) {
+  const baseComponents: React.ComponentProps<typeof ReactMarkdown>["components"] = {
+    a: ({ href, children, ...props }) => (
+      <a
+        {...props}
+        href={href}
+        target="_blank"
+        rel="noopener noreferrer"
+        onClick={(e) => {
+          e.preventDefault();
+          if (!href) return;
+          void openUrl(href);
+        }}
+      >
+        {children}
+      </a>
+    ),
+    pre: ({ children }) => <>{children}</>,
+    code: ({ className, children, ...props }) => {
+      const content = String(children ?? "");
+      const isBlock =
+        (className || "").includes("language-") || content.includes("\n");
+      if (!isBlock) {
+        return (
+          <code className={className} {...props}>
+            {children}
+          </code>
+        );
+      }
+      return (
+        <MarkdownCodeBlock
+          code={content.replace(/\n$/, "")}
+          language={markdownCodeLanguage(className)}
+          isDark={isDark}
+        />
+      );
+    },
+  };
   return (
     <div className={`prose-ai${isDark ? " prose-dark" : ""}`}>
       <ReactMarkdown
         remarkPlugins={[remarkGfm, remarkMath]}
         rehypePlugins={[rehypeRaw, rehypeKatex]}
-        components={{
-          a: ({ href, children, ...props }) => (
-            <a
-              {...props}
-              href={href}
-              target="_blank"
-              rel="noopener noreferrer"
-              onClick={(e) => {
-                e.preventDefault();
-                if (!href) return;
-                void openUrl(href);
-              }}
-            >
-              {children}
-            </a>
-          ),
-          pre: ({ children }) => <>{children}</>,
-          code: ({ className, children, ...props }) => {
-            const content = String(children ?? "");
-            const isBlock =
-              (className || "").includes("language-") || content.includes("\n");
-            if (!isBlock) {
-              return (
-                <code className={className} {...props}>
-                  {children}
-                </code>
-              );
-            }
-            return (
-              <MarkdownCodeBlock
-                code={content.replace(/\n$/, "")}
-                language={markdownCodeLanguage(className)}
-                isDark={isDark}
-              />
-            );
-          },
-        }}
+        components={{ ...baseComponents, ...extraComponents }}
       >
         {fixMarkdown(text)}
       </ReactMarkdown>
     </div>
   );
 }
+
+const hasContent = (s?: string) => !!s?.trim();
 
 function aiShellStyle(t: ReturnType<typeof useTheme>): React.CSSProperties {
   return {
@@ -1488,10 +1498,8 @@ function CanvasBubble({
   const absPath = mediaDir && canvas.content_media_id ? `${mediaDir}/${canvas.content_media_id}` : "";
   const disabled = !absPath;
   const bytes = canvas.size_bytes ?? 0;
-  const metaBits: string[] = [];
-  if (bytes > 0) metaBits.push(formatBytes(bytes));
-  const metaText = metaBits.join(" · ");
-  const hasLeading = !inline && !!(leadingText && leadingText.trim().length > 0);
+  const metaText = bytes > 0 ? formatBytes(bytes) : "";
+  const hasLeading = !inline && hasContent(leadingText);
 
   async function handleOpen() {
     if (disabled) return;
@@ -1588,7 +1596,7 @@ function ResearchPlanBubble({
   const steps = plan.steps ?? [];
   const railColor = t.isDark ? "rgba(255,255,255,0.12)" : "rgba(0,0,0,0.08)";
   const accent = t.isDark ? ACCENT_BLUE_DARK : ACCENT_BLUE;
-  const hasLeading = !!(leadingText && leadingText.trim().length > 0);
+  const hasLeading = hasContent(leadingText);
 
   return (
     <div style={{ ...aiShellStyle(t), padding: "14px 18px 16px" }}>
@@ -1704,7 +1712,7 @@ function ResearchReportBubble({
   const [progressHovered, setProgressHovered] = useState(false);
   const [reportHovered, setReportHovered] = useState(false);
   const accent = t.isDark ? ACCENT_BLUE_DARK : ACCENT_BLUE;
-  const hasLeading = !!(leadingText && leadingText.trim().length > 0);
+  const hasLeading = hasContent(leadingText);
 
   const rounds = report.rounds ?? 0;
   const webCount = report.web_count ?? 0;
@@ -1743,7 +1751,6 @@ function ResearchReportBubble({
       defaultTab,
     });
   };
-
 
   function row(opts: {
     icon: React.ReactNode;

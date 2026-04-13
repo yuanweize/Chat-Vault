@@ -1,10 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import ReactDOM from "react-dom";
-import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
-import remarkMath from "remark-math";
-import rehypeKatex from "rehype-katex";
-import rehypeRaw from "rehype-raw";
 import { invoke } from "@tauri-apps/api/core";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { useTheme } from "../theme";
@@ -16,15 +11,12 @@ import {
   SpinnerIcon,
 } from "./Icons";
 import {
-  fixMarkdown,
-  markdownCodeLanguage,
-  MarkdownCodeBlock,
+  ACCENT_BLUE,
+  ACCENT_BLUE_DARK,
+  AIMarkdown,
   formatBytes,
   formatProgressBits,
 } from "./ChatView";
-
-const ACCENT_BLUE = "#0071e3";
-const ACCENT_BLUE_DARK = "#9cc9ff";
 
 type ProgressEntry = {
   type: "thinking" | "web_search" | "file_search";
@@ -340,9 +332,9 @@ function ReportPanel({
     };
   }, [md, toc.length]);
 
-  // heading id 生成计数器（与 buildToc 顺序一致）
-  let hCount = 0;
-  const nextHeadingId = () => `h-${hCount++}`;
+  const hCountRef = useRef(0);
+  hCountRef.current = 0;
+  const nextHeadingId = () => `h-${hCountRef.current++}`;
 
   const onTocClick = (id: string) => {
     const scroller = scrollRef.current;
@@ -444,11 +436,11 @@ function ReportPanel({
             <div style={{ color: "#d84a3a", fontSize: 13 }}>加载失败：{err}</div>
           )}
           {md !== null && !err && (
-            <div style={{ maxWidth: 780, margin: "0 auto" }} className={`prose-ai${t.isDark ? " prose-dark" : ""}`}>
-              <ReactMarkdown
-                remarkPlugins={[remarkGfm, remarkMath]}
-                rehypePlugins={[rehypeRaw, rehypeKatex]}
-                components={{
+            <div style={{ maxWidth: 780, margin: "0 auto" }}>
+              <AIMarkdown
+                text={md}
+                isDark={t.isDark}
+                extraComponents={{
                   h1: ({ children, ...props }) => {
                     const id = nextHeadingId();
                     return <h1 id={id} data-toc-id={id} {...props}>{children}</h1>;
@@ -461,40 +453,8 @@ function ReportPanel({
                     const id = nextHeadingId();
                     return <h3 id={id} data-toc-id={id} {...props}>{children}</h3>;
                   },
-                  a: ({ href, children, ...props }) => (
-                    <a
-                      {...props}
-                      href={href}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      onClick={(e) => {
-                        e.preventDefault();
-                        if (href) void openUrl(href);
-                      }}
-                    >
-                      {children}
-                    </a>
-                  ),
-                  pre: ({ children }) => <>{children}</>,
-                  code: ({ className, children, ...props }) => {
-                    const content = String(children ?? "");
-                    const isBlock =
-                      (className || "").includes("language-") || content.includes("\n");
-                    if (!isBlock) {
-                      return <code className={className} {...props}>{children}</code>;
-                    }
-                    return (
-                      <MarkdownCodeBlock
-                        code={content.replace(/\n$/, "")}
-                        language={markdownCodeLanguage(className)}
-                        isDark={t.isDark}
-                      />
-                    );
-                  },
                 }}
-              >
-                {fixMarkdown(md)}
-              </ReactMarkdown>
+              />
             </div>
           )}
         </div>

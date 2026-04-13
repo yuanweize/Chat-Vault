@@ -545,6 +545,10 @@ fn sort_parsed_turns_by_timestamp(parsed_turns: &[Value]) -> Vec<Value> {
     indexed.into_iter().map(|(_, v)| v.clone()).collect()
 }
 
+fn new_media_id(ext: &str) -> String {
+    format!("{}.{}", Uuid::new_v4().to_string().replace("-", ""), ext)
+}
+
 pub fn turns_to_jsonl_rows(
     parsed_turns: &[Value],
     conv_id: &str,
@@ -686,7 +690,7 @@ pub fn turns_to_jsonl_rows(
                 if dr.get("type").and_then(|v| v.as_str()) == Some("report") {
                     if let Some(text) = dr.get("report_text").and_then(|v| v.as_str()) {
                         if !text.is_empty() {
-                            let media_id = format!("{}.md", Uuid::new_v4().to_string().replace("-", ""));
+                            let media_id = new_media_id("md");
                             let size_bytes = text.as_bytes().len();
                             let char_count = text.chars().count();
                             let _ = std::fs::write(media_dir.join(&media_id), text.as_bytes());
@@ -721,7 +725,7 @@ pub fn turns_to_jsonl_rows(
                             }
                             let payload = Value::Array(entries);
                             let serialized = serde_json::to_vec(&payload).unwrap_or_else(|_| b"[]".to_vec());
-                            let media_id = format!("{}.json", Uuid::new_v4().to_string().replace("-", ""));
+                            let media_id = new_media_id("json");
                             let size_bytes = serialized.len();
                             let _ = std::fs::write(media_dir.join(&media_id), &serialized);
                             dr.as_object_mut().map(|o| {
@@ -752,7 +756,7 @@ pub fn turns_to_jsonl_rows(
                                 .and_then(|v| v.as_str())
                                 .and_then(|f| f.rsplit('.').next())
                                 .unwrap_or("txt");
-                            let media_id = format!("{}.{}", Uuid::new_v4().to_string().replace("-", ""), ext);
+                            let media_id = new_media_id(ext);
                             let size_bytes = content.as_bytes().len();
                             let char_count = content.chars().count();
                             let _ = std::fs::write(media_dir.join(&media_id), content.as_bytes());
