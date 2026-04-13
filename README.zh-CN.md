@@ -34,6 +34,14 @@ macOS & Windows 原生应用 · 支持多账号 · 亮色 / 暗色主题
 |:---:|:---:|
 | <img src=".github/images/chat-conversation.png" width="420" alt="Google Gemini conversation list sync and local backup management" title="对话导览" /> | <img src=".github/images/export-dialog.png" width="420" alt="Exporting Google Gemini conversations to local Markdown and JSON formats" title="导出数据" /> |
 
+| 深度调研 | Canvas 文件 |
+|:---:|:---:|
+| <img src=".github/images/deep-research-chat.png" width="420" alt="Gemini 深度调研对话，显示调研轮数与来源数量" title="深度调研" /> | <img src=".github/images/canvas-chat.png" width="420" alt="对话中展示多个 AI 生成的 Canvas 文件" title="Canvas 文件" /> |
+
+| 调研过程 | 报告详情 |
+|:---:|:---:|
+| <img src=".github/images/deep-research-progress.png" width="420" alt="深度调研过程时间线，含轮次、思考步骤与搜索来源" title="调研过程" /> | <img src=".github/images/deep-research-report.png" width="420" alt="深度调研报告详情，带目录导航" title="报告详情" /> |
+
 </div>
 
 ---
