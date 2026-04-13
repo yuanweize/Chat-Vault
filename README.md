@@ -55,8 +55,8 @@ Native desktop app for macOS & Windows · Multi-account · Light / Dark theme
 
 **Full content archival**
 - Sync all conversation text with complete context
-- Download user-uploaded images and videos
-- Save AI-generated images, music, videos, and other media — nothing is left behind
+- Download user-uploaded attachments
+- Save AI-generated images, music, videos, reports, and more — nothing is left behind
 
 **Reading experience**
 - Native UI with automatic light / dark theme switching
