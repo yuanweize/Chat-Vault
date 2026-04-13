@@ -34,6 +34,14 @@ Native desktop app for macOS & Windows · Multi-account · Light / Dark theme
 |:---:|:---:|
 | <img src=".github/images/chat-conversation.png" width="420" alt="Google Gemini conversation list sync and local backup management" title="Conversation list" /> | <img src=".github/images/export-dialog.png" width="420" alt="Exporting Google Gemini conversations to local Markdown and JSON formats" title="Export" /> |
 
+| Deep Research | Canvas files |
+|:---:|:---:|
+| <img src=".github/images/deep-research-chat.png" width="420" alt="Google Gemini Deep Research conversation with rounds and sources summary" title="Deep Research" /> | <img src=".github/images/canvas-chat.png" width="420" alt="Multiple AI-generated HTML canvas files displayed inline in chat" title="Canvas files" /> |
+
+| Research progress | Research report |
+|:---:|:---:|
+| <img src=".github/images/deep-research-progress.png" width="420" alt="Deep Research progress timeline with rounds, thinking steps, and web sources" title="Research progress" /> | <img src=".github/images/deep-research-report.png" width="420" alt="Deep Research full report viewer with table of contents" title="Research report" /> |
+
 </div>
 
 ---
