@@ -233,6 +233,33 @@ interface TocItem {
   level: number;
   text: string;
   id: string;
+  line: number;
+}
+
+type MarkdownHeadingNode = {
+  position?: {
+    start?: {
+      line?: number;
+    };
+  };
+};
+
+const TOC_POSITION_OFFSET = 12;
+
+function getScrollTargetTop(
+  scroller: HTMLElement,
+  el: HTMLElement,
+  offset = TOC_POSITION_OFFSET,
+): number {
+  const scrollerRect = scroller.getBoundingClientRect();
+  const elRect = el.getBoundingClientRect();
+  return elRect.top - scrollerRect.top + scroller.scrollTop - offset;
+}
+
+function scrollToTocTarget(scroller: HTMLElement, el: HTMLElement) {
+  const maxTop = Math.max(0, scroller.scrollHeight - scroller.clientHeight);
+  const top = Math.max(0, Math.min(getScrollTargetTop(scroller, el), maxTop));
+  scroller.scrollTop = top;
 }
 
 /** 预扫 markdown 文本，按 heading 出现顺序产出 TOC（跳过 fenced code block 内部的 #）。 */
@@ -242,7 +269,8 @@ function buildToc(md: string): TocItem[] {
   let inFence = false;
   let fenceTag = "";
   let idx = 0;
-  for (const line of lines) {
+  for (let lineIndex = 0; lineIndex < lines.length; lineIndex += 1) {
+    const line = lines[lineIndex];
     const fence = line.match(/^\s{0,3}(```+|~~~+)/);
     if (fence) {
       if (!inFence) {
@@ -259,7 +287,7 @@ function buildToc(md: string): TocItem[] {
     const level = m[1].length;
     const text = m[2].replace(/`/g, "").trim();
     if (!text) continue;
-    items.push({ level, text, id: `h-${idx}` });
+    items.push({ level, text, id: `h-${idx}`, line: lineIndex + 1 });
     idx += 1;
   }
   return items;
@@ -300,6 +328,7 @@ function ReportPanel({
   }, [accountId, reportMediaId]);
 
   const toc = useMemo(() => (md ? buildToc(md) : []), [md]);
+  const tocIdByLine = useMemo(() => new Map(toc.map((item) => [item.line, item.id])), [toc]);
 
   useEffect(() => {
     if (!md || toc.length === 0) return;
@@ -332,17 +361,18 @@ function ReportPanel({
     };
   }, [md, toc.length]);
 
-  const hCountRef = useRef(0);
-  hCountRef.current = 0;
-  const nextHeadingId = () => `h-${hCountRef.current++}`;
+  const tocHeadingProps = (node?: MarkdownHeadingNode) => {
+    const line = node?.position?.start?.line;
+    const id = typeof line === "number" ? tocIdByLine.get(line) : undefined;
+    return id ? { id, "data-toc-id": id } : {};
+  };
 
   const onTocClick = (id: string) => {
     const scroller = scrollRef.current;
     if (!scroller) return;
     const el = scroller.querySelector<HTMLElement>(`[data-toc-id="${id}"]`);
     if (!el) return;
-    const top = el.offsetTop - 12;
-    scroller.scrollTo({ top, behavior: "smooth" });
+    scrollToTocTarget(scroller, el);
     setActiveId(id);
   };
 
@@ -423,7 +453,6 @@ function ReportPanel({
             flex: 1,
             overflowY: "auto",
             padding: "24px 36px 80px",
-            scrollBehavior: "smooth",
           }}
         >
           {md === null && !err && (
@@ -441,18 +470,15 @@ function ReportPanel({
                 text={md}
                 isDark={t.isDark}
                 extraComponents={{
-                  h1: ({ children, ...props }) => {
-                    const id = nextHeadingId();
-                    return <h1 id={id} data-toc-id={id} {...props}>{children}</h1>;
-                  },
-                  h2: ({ children, ...props }) => {
-                    const id = nextHeadingId();
-                    return <h2 id={id} data-toc-id={id} {...props}>{children}</h2>;
-                  },
-                  h3: ({ children, ...props }) => {
-                    const id = nextHeadingId();
-                    return <h3 id={id} data-toc-id={id} {...props}>{children}</h3>;
-                  },
+                  h1: ({ node, children, ...props }) => (
+                    <h1 {...props} {...tocHeadingProps(node)}>{children}</h1>
+                  ),
+                  h2: ({ node, children, ...props }) => (
+                    <h2 {...props} {...tocHeadingProps(node)}>{children}</h2>
+                  ),
+                  h3: ({ node, children, ...props }) => (
+                    <h3 {...props} {...tocHeadingProps(node)}>{children}</h3>
+                  ),
                 }}
               />
             </div>
@@ -912,4 +938,3 @@ function ProgressItem({
     </div>
   );
 }
-
