@@ -54,6 +54,25 @@ export function Sidebar({
 }: SidebarProps) {
   const t = useTheme();
   const [showSwitcher, setShowSwitcher] = useState(false);
+  const switcherTriggerRef = useRef<HTMLDivElement>(null);
+  const [switcherRect, setSwitcherRect] = useState<{ left: number; top: number; width: number } | null>(null);
+  const updateSwitcherRect = useCallback(() => {
+    const el = switcherTriggerRef.current;
+    if (!el) return;
+    const r = el.getBoundingClientRect();
+    setSwitcherRect({
+      left: r.left + 6,
+      top: r.top - 2,
+      width: r.width - 12,
+    });
+  }, []);
+  useEffect(() => {
+    if (!showSwitcher) return;
+    updateSwitcherRect();
+    const onResize = () => updateSwitcherRect();
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, [showSwitcher, updateSwitcherRect]);
   const [cancelConfirm, setCancelConfirm] = useState<"list" | "full" | null>(null);
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; convId: string } | null>(null);
   const [showSearch, setShowSearch] = useState(false);
@@ -485,28 +504,35 @@ export function Sidebar({
       </div>
 
       <div
+        ref={switcherTriggerRef}
         onMouseEnter={() => {
           if (disableAccountSwitch) return;
+          updateSwitcherRect();
           setShowSwitcher(true);
         }}
         onMouseLeave={() => setShowSwitcher(false)}
         style={{ padding: "0 6px 6px", minWidth: 260, position: "relative" }}
       >
-        {showSwitcher && (
-          <div style={{
-            position: "absolute",
-            bottom: "100%",
-            left: 6,
-            right: 6,
-            marginBottom: 2,
-            borderRadius: 10,
-            background: t.cardBg,
-            border: "none",
-            backdropFilter: "blur(28px) saturate(115%)",
-            WebkitBackdropFilter: "blur(28px) saturate(115%)",
-            overflow: "hidden",
-            boxShadow: t.isDark ? "0 -8px 22px rgba(3,8,18,0.5)" : "0 -8px 22px rgba(80,104,146,0.18)",
-          }}>
+        {showSwitcher && switcherRect && otherAccounts.length > 0 && createPortal(
+          <div
+            onMouseEnter={() => setShowSwitcher(true)}
+            onMouseLeave={() => setShowSwitcher(false)}
+            style={{
+              position: "fixed",
+              left: switcherRect.left,
+              top: switcherRect.top,
+              width: switcherRect.width,
+              transform: "translateY(-100%)",
+              borderRadius: 10,
+              background: t.cardBg,
+              border: "none",
+              backdropFilter: "blur(28px) saturate(115%)",
+              WebkitBackdropFilter: "blur(28px) saturate(115%)",
+              overflow: "hidden",
+              zIndex: 2000,
+              boxShadow: t.isDark ? "0 -8px 22px rgba(3,8,18,0.5)" : "0 -8px 22px rgba(80,104,146,0.18)",
+            }}
+          >
             {otherAccounts.map((account) => (
               <button
                 key={account.id}
@@ -533,7 +559,8 @@ export function Sidebar({
                 </div>
               </button>
             ))}
-          </div>
+          </div>,
+          document.body,
         )}
 
         <div style={{
