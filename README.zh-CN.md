@@ -115,4 +115,6 @@ macOS & Windows 原生应用 · 支持多账号 · 亮色 / 暗色主题
 
 ## 许可证
 
-[PolyForm Noncommercial License 1.0.0](./LICENSE) — 免费用于非商业目的，可自由使用、修改和分发。
+[GNU AGPL-3.0](./LICENSE) — 可免费使用、修改和分发。但若将修改后的版本作为网络服务对外提供，或进行分发，必须以相同协议公开完整的对应源代码。
+
+**双授权：** 如需用于无法遵守 AGPL 的专有/闭源产品或托管服务，可单独获取商业授权，请通过 [GitHub](https://github.com/FirenzeLor/gemini-collector) 联系维护者。
