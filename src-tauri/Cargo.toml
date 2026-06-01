@@ -1,9 +1,10 @@
 [package]
 name = "gemini-collector"
-version = "0.1.0"
-description = "A Tauri App"
-authors = ["you"]
+version = "2.0.6"
+description = "Back up Google Gemini conversations and AI-generated media locally"
+authors = ["FirenzeLor"]
 license = "AGPL-3.0-only"
+repository = "https://github.com/FirenzeLor/gemini-collector"
 edition = "2021"
 default-run = "gemini-collector"
 

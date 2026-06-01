@@ -1,7 +1,10 @@
 {
   "name": "gemini-collector",
   "private": true,
-  "version": "0.1.0",
+  "version": "2.0.6",
+  "description": "Back up Google Gemini conversations and AI-generated media locally",
+  "author": "FirenzeLor",
+  "repository": "https://github.com/FirenzeLor/gemini-collector",
   "license": "AGPL-3.0-only",
   "type": "module",
   "scripts": {

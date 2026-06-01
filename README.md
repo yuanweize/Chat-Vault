@@ -117,4 +117,4 @@ Native desktop app for macOS & Windows · Multi-account · Light / Dark theme
 
 [GNU AGPL-3.0](./LICENSE) — free to use, modify, and share. If you run a modified version as a network service, or distribute it, you must release the complete corresponding source code under the same license.
 
-**Dual licensing:** a separate commercial license is available for proprietary/closed-source or hosted use that cannot comply with the AGPL. Contact the maintainer via [GitHub](https://github.com/FirenzeLor/gemini-collector).
+**Dual licensing:** a separate [commercial license](./COMMERCIAL-LICENSE.md) is available for proprietary/closed-source or hosted use that cannot comply with the AGPL.
