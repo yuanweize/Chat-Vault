@@ -623,7 +623,7 @@ async fn open_google_login(app: tauri::AppHandle) -> Result<String, String> {
     log::info!("开始调用 ListAccounts，cookie 数量={}", cookies.len());
     let mappings = match cookies::list_accounts::discover_email_authuser_mapping(&cookies).await {
         Ok(m) => {
-            log::info!("ListAccounts 返回 {} 个账号映射: {:?}", m.len(), m);
+            log::info!("ListAccounts 返回 {} 个账号映射", m.len());
             m
         }
         Err(e) => {
@@ -641,7 +641,7 @@ async fn open_google_login(app: tauri::AppHandle) -> Result<String, String> {
     // 写入账号数据（单账户，取第一个）
     let m = &mappings[0];
     let account_id = protocol::email_to_account_id(&m.email);
-    log::info!("写入账号数据: email={}, account_id={}", m.email, account_id);
+    log::info!("写入账号数据: account_id={}", protocol::mask_email(&account_id));
     let account_dir = data_dir.join("accounts").join(&account_id);
     std::fs::create_dir_all(account_dir.join("conversations")).str_err()?;
     std::fs::create_dir_all(account_dir.join("media")).str_err()?;
@@ -1153,7 +1153,7 @@ fn load_conversation_detail(
         );
         log::warn!(
             "[load_conversation_detail] account={} conversation={} parse_errors={} lines={:?}",
-            account_id, bare_id, parse_error_count, parse_error_lines
+            protocol::mask_email(&account_id), bare_id, parse_error_count, parse_error_lines
         );
         Some(warning)
     } else {

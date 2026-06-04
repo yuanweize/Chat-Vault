@@ -145,8 +145,7 @@ impl GeminiExporter {
             .map_err(|e| format!("读取 batchexecute 响应失败: {}", e))?;
 
         if !status.is_success() {
-            let preview: String = resp_text.chars().take(500).collect();
-            log::debug!("HTTP {} 响应内容: {}", status.as_u16(), preview);
+            log::debug!("HTTP {} 响应失败, body length={}", status.as_u16(), resp_text.len());
             return Err(format!("batchexecute 失败: HTTP {}", status.as_u16()));
         }
 

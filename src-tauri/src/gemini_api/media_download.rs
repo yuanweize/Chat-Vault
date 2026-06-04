@@ -249,7 +249,8 @@ impl GeminiExporter {
                     let _ = std::fs::create_dir_all(parent);
                 }
                 if let Err(e) = std::fs::write(&item.filepath, &bytes) {
-                    log::error!("[media-fail] 写入文件失败: {} - {}", item.filepath.display(), e);
+                    let fname = item.filepath.file_name().and_then(|n| n.to_str()).unwrap_or("?");
+                    log::error!("[media-fail] 写入文件失败: {} - {}", fname, e);
                     stats.media_failed += 1;
                     failed_items.push(FailedDownloadItem {
                         media_id: item.media_id.clone(),

@@ -224,7 +224,7 @@ impl WorkerHost {
 
     /// 刷新某个账号的 exporter session（重新读取 cookies）
     async fn refresh_session(self: &Arc<Self>, account_id: &str) -> Result<Arc<GeminiExporter>, String> {
-        log::warn!("session 过期，重建 exporter (account={})", account_id);
+        log::warn!("session 过期，重建 exporter (account={})", crate::protocol::mask_email(account_id));
 
         // 清空 cookie 缓存
         *self.cookies_cache.lock().await = None;
@@ -392,7 +392,7 @@ impl WorkerHost {
         let mut success_ids: std::collections::HashSet<String> = std::collections::HashSet::new();
         let mut failed_ids: std::collections::HashSet<String> = std::collections::HashSet::new();
 
-        log::info!("[sync_full] 开始全量同步: account={}", account_id);
+        log::info!("[sync_full] 开始全量同步: account={}", crate::protocol::mask_email(account_id));
 
         let items_before = load_conversation_items(&self.output_dir, account_id);
         let before_set: std::collections::HashSet<String> =
@@ -705,7 +705,7 @@ impl WorkerHost {
         let cancels = self.active_cancels.lock().await;
         if let Some(token) = cancels.get(account_id) {
             token.cancel();
-            log::info!("已发送取消信号: account={}", account_id);
+            log::info!("已发送取消信号: account={}", crate::protocol::mask_email(account_id));
         }
     }
 

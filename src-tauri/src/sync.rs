@@ -77,7 +77,7 @@ impl GeminiExporter {
         std::fs::create_dir_all(&conv_dir).str_err()?;
         std::fs::create_dir_all(&media_dir).str_err()?;
 
-        log::info!("仅同步列表到: {}", account_dir.display());
+        log::info!("仅同步列表，账号: {}", crate::protocol::mask_email(account_id));
 
         let (existing_order, existing_index) = storage::load_conversations_index(&account_dir);
         let sync_state = storage::load_sync_state(&account_dir);
