@@ -127,11 +127,34 @@ impl GeminiExporter {
         let mut stop_early = false;
         let mut cursor = resume_cursor;
         let mut page = 0u32;
+        // 仅当从断点 cursor 续传时，首个请求若空/报错说明该 cursor 已失效 →
+        // 清掉它从第一页重拉（只一次，避免把"正常翻到末页的空响应"误判为失效）。
+        let mut retry_on_stale_cursor = cursor.is_some();
 
         loop {
             page += 1;
             let t_page = std::time::Instant::now();
-            let (chats, next_cursor) = self.get_chats_page(cursor.as_deref()).await?;
+            let page_result = self.get_chats_page(cursor.as_deref()).await;
+
+            let stale_cursor = retry_on_stale_cursor
+                && match &page_result {
+                    Err(_) => true,
+                    Ok((chats, next_cursor)) => chats.is_empty() && next_cursor.is_none(),
+                };
+            if stale_cursor {
+                log::warn!("续传 cursor 已失效，清除本地 cursor 并从第一页重新拉取");
+                retry_on_stale_cursor = false;
+                cursor = None;
+                page = 0;
+                fetched_order.clear();
+                fetched_seen.clear();
+                conv_index = existing_index.clone();
+                updated_ids.clear();
+                continue;
+            }
+            retry_on_stale_cursor = false;
+
+            let (chats, next_cursor) = page_result?;
 
             if chats.is_empty() && next_cursor.is_none() {
                 // 完成
