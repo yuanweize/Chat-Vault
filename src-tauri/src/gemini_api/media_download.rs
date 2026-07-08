@@ -13,10 +13,8 @@ use crate::str_err::ToStringErr;
 use reqwest::header;
 use url::Url;
 
-use crate::media::{
-    append_authuser, is_protected_media_url, media_log_fields, infer_media_type,
-};
 use crate::browser_info;
+use crate::media::{append_authuser, infer_media_type, is_protected_media_url, media_log_fields};
 use crate::protocol::GEMINI_BASE;
 use crate::storage;
 
@@ -96,14 +94,16 @@ impl GeminiExporter {
             );
             headers.insert(
                 header::ACCEPT_LANGUAGE,
-                header::HeaderValue::from_str(browser_info::detect_accept_language()).unwrap_or_else(|_| header::HeaderValue::from_static("en-US,en;q=0.9")),
+                header::HeaderValue::from_str(browser_info::detect_accept_language())
+                    .unwrap_or_else(|_| header::HeaderValue::from_static("en-US,en;q=0.9")),
             );
             if let Ok(val) = header::HeaderValue::from_str(referer) {
                 headers.insert(header::REFERER, val);
             }
             headers.insert(
                 header::USER_AGENT,
-                header::HeaderValue::from_str(browser_info::build_user_agent()).unwrap_or_else(|_| header::HeaderValue::from_static("Mozilla/5.0")),
+                header::HeaderValue::from_str(browser_info::build_user_agent())
+                    .unwrap_or_else(|_| header::HeaderValue::from_static("Mozilla/5.0")),
             );
 
             // protected host 才注入 cookie
@@ -113,25 +113,44 @@ impl GeminiExporter {
                 }
             }
 
-            self.before_request("media_http_get").await?;
+            let mut resp_result = None;
+            for attempt in 1..=3 {
+                self.before_request("media_http_get").await?;
+                let r = no_redirect_client
+                    .get(&current_url)
+                    .headers(headers.clone())
+                    .send()
+                    .await;
+                
+                match &r {
+                    Ok(res) if res.status().is_server_error() => {
+                        log::warn!("[media-retry] 5xx 服务端错误 {}, 第 {}/3 次重试 | {}", res.status(), attempt, current_url);
+                    }
+                    Ok(_) => {
+                        resp_result = Some(r);
+                        break;
+                    }
+                    Err(e) => {
+                        log::warn!("[media-retry] 网络波动 {}, 第 {}/3 次重试 | {}", e, attempt, current_url);
+                    }
+                }
 
-            let resp = no_redirect_client
-                .get(&current_url)
-                .headers(headers)
-                .send()
-                .await;
+                if attempt < 3 {
+                    tokio::time::sleep(std::time::Duration::from_secs(attempt as u64)).await;
+                } else {
+                    resp_result = Some(r);
+                }
+            }
 
-            let resp = match resp {
+            let resp = match resp_result.expect("Should have a result") {
                 Ok(r) => r,
                 Err(e) => {
-                    let fields = media_log_fields(
-                        Some(&current_url),
-                        media_type,
-                        media_hint,
-                    );
+                    let fields = media_log_fields(Some(&current_url), media_type, media_hint);
                     log::warn!(
-                        "[media-fail] 下载异常: {} | media={} domain={}",
-                        e, fields.media, fields.domain
+                        "[media-fail] 彻底失败，重试多次依然异常: {} | media={} domain={}",
+                        e,
+                        fields.media,
+                        fields.domain
                     );
                     return Ok(None);
                 }
@@ -149,7 +168,10 @@ impl GeminiExporter {
                     Some(loc) => {
                         // 相对 URL 拼接
                         current_url = match Url::parse(&current_url) {
-                            Ok(base) => base.join(loc).map(|u| u.to_string()).unwrap_or_else(|_| loc.to_string()),
+                            Ok(base) => base
+                                .join(loc)
+                                .map(|u| u.to_string())
+                                .unwrap_or_else(|_| loc.to_string()),
                             Err(_) => loc.to_string(),
                         };
                         continue;
@@ -157,7 +179,8 @@ impl GeminiExporter {
                     None => {
                         log::warn!(
                             "[media-fail] 重定向缺少 location | media={} domain={}",
-                            fields.media, fields.domain
+                            fields.media,
+                            fields.domain
                         );
                         return Ok(None);
                     }
@@ -181,7 +204,8 @@ impl GeminiExporter {
         let fields = media_log_fields(Some(url), media_type, media_hint);
         log::warn!(
             "[media-fail] 重定向次数超限 | media={} domain={}",
-            fields.media, fields.domain
+            fields.media,
+            fields.domain
         );
         Ok(None)
     }
@@ -228,7 +252,13 @@ impl GeminiExporter {
             let mut content: Option<Vec<u8>> = None;
             for candidate_url in &candidates {
                 match self
-                    .download_one_media(candidate_url, &cookie_header, &referer, media_type, media_hint)
+                    .download_one_media(
+                        candidate_url,
+                        &cookie_header,
+                        &referer,
+                        media_type,
+                        media_hint,
+                    )
                     .await
                 {
                     Ok(Some(bytes)) => {
@@ -249,7 +279,11 @@ impl GeminiExporter {
                     let _ = std::fs::create_dir_all(parent);
                 }
                 if let Err(e) = std::fs::write(&item.filepath, &bytes) {
-                    let fname = item.filepath.file_name().and_then(|n| n.to_str()).unwrap_or("?");
+                    let fname = item
+                        .filepath
+                        .file_name()
+                        .and_then(|n| n.to_str())
+                        .unwrap_or("?");
                     log::error!("[media-fail] 写入文件失败: {} - {}", fname, e);
                     stats.media_failed += 1;
                     failed_items.push(FailedDownloadItem {
@@ -259,7 +293,11 @@ impl GeminiExporter {
                     });
                 } else {
                     let size_mb = bytes.len() as f64 / (1024.0 * 1024.0);
-                    let fields = media_log_fields(Some(&item.url), item.media_type.as_deref(), Some(item.media_id.as_str()));
+                    let fields = media_log_fields(
+                        Some(&item.url),
+                        item.media_type.as_deref(),
+                        Some(item.media_id.as_str()),
+                    );
                     log::info!(
                         "[media] ok: {} {:.2}MB media={} domain={} {}ms",
                         item.media_id,
@@ -274,7 +312,10 @@ impl GeminiExporter {
                 let fields = media_log_fields(Some(&item.url), media_type, media_hint);
                 log::warn!(
                     "[media-fail] 媒体下载失败，已跳过: {} | media={} domain={}",
-                    item.filepath.file_name().and_then(|s| s.to_str()).unwrap_or("?"),
+                    item.filepath
+                        .file_name()
+                        .and_then(|s| s.to_str())
+                        .unwrap_or("?"),
                     fields.media,
                     fields.domain
                 );
@@ -340,15 +381,10 @@ impl GeminiExporter {
                     let media_id = if let Some(fname) = global_seen_urls.get(&url) {
                         fname.clone()
                     } else {
-                        let media_type = f_obj
-                            .get("type")
-                            .and_then(|v| v.as_str())
-                            .unwrap_or("");
+                        let media_type = f_obj.get("type").and_then(|v| v.as_str()).unwrap_or("");
                         let ext = determine_extension(media_type, f_obj);
                         let fname = loop {
-                            let stem = uuid::Uuid::new_v4()
-                                .to_string()
-                                .replace('-', "");
+                            let stem = uuid::Uuid::new_v4().to_string().replace('-', "");
                             let candidate = format!("{}.{}", stem, ext);
                             if !global_used_names.contains(&candidate) {
                                 break candidate;
@@ -366,7 +402,9 @@ impl GeminiExporter {
 
                     let target = media_dir.join(&media_id);
                     if !target.exists()
-                        && !batch_list.iter().any(|b: &MediaDownloadItem| b.filepath == target)
+                        && !batch_list
+                            .iter()
+                            .any(|b: &MediaDownloadItem| b.filepath == target)
                     {
                         batch_list.push(MediaDownloadItem {
                             url: url.clone(),
@@ -482,7 +520,10 @@ impl GeminiExporter {
 // ============================================================================
 
 /// 根据媒体类型和文件名推断扩展名
-fn determine_extension(media_type: &str, f_obj: &serde_json::Map<String, serde_json::Value>) -> String {
+fn determine_extension(
+    media_type: &str,
+    f_obj: &serde_json::Map<String, serde_json::Value>,
+) -> String {
     let default_ext = match media_type {
         "video" => "mp4",
         "audio" => "mp3",
@@ -490,18 +531,14 @@ fn determine_extension(media_type: &str, f_obj: &serde_json::Map<String, serde_j
         _ => "jpg",
     };
 
-    let raw_name = f_obj
-        .get("filename")
-        .and_then(|v| v.as_str())
-        .unwrap_or("");
+    let raw_name = f_obj.get("filename").and_then(|v| v.as_str()).unwrap_or("");
 
     if !raw_name.is_empty() {
         let known_exts = [
-            "jpg", "jpeg", "png", "webp", "gif", "bmp", "mp4", "mov", "webm", "mkv", "mp3",
-            "m4a", "wav", "aac", "flac", "ogg",
-            // attachment / document types
-            "md", "txt", "pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx",
-            "csv", "json", "xml", "html", "htm", "rtf", "zip", "tar", "gz",
+            "jpg", "jpeg", "png", "webp", "gif", "bmp", "mp4", "mov", "webm", "mkv", "mp3", "m4a",
+            "wav", "aac", "flac", "ogg", // attachment / document types
+            "md", "txt", "pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx", "csv", "json", "xml",
+            "html", "htm", "rtf", "zip", "tar", "gz",
         ];
         if let Some(ext) = Path::new(raw_name)
             .extension()

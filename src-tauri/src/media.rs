@@ -86,9 +86,7 @@ pub fn append_authuser(url_str: &str, authuser: &str) -> String {
     for (k, v) in &pairs {
         parsed.query_pairs_mut().append_pair(k, v);
     }
-    parsed
-        .query_pairs_mut()
-        .append_pair("authuser", authuser);
+    parsed.query_pairs_mut().append_pair("authuser", authuser);
     parsed.to_string()
 }
 
@@ -136,18 +134,16 @@ mod tests {
 
     #[test]
     fn test_is_protected_media_url() {
-        assert!(is_protected_media_url("https://lh3.googleusercontent.com/img.jpg"));
+        assert!(is_protected_media_url(
+            "https://lh3.googleusercontent.com/img.jpg"
+        ));
         assert!(is_protected_media_url("https://lh3.google.com/media/abc"));
         assert!(!is_protected_media_url("https://example.com/img.jpg"));
     }
 
     #[test]
     fn test_media_log_fields() {
-        let fields = media_log_fields(
-            Some("https://lh3.google.com/img.jpg"),
-            Some("image"),
-            None,
-        );
+        let fields = media_log_fields(Some("https://lh3.google.com/img.jpg"), Some("image"), None);
         assert_eq!(fields.media, "image");
         assert_eq!(fields.domain, "lh3.google.com");
     }

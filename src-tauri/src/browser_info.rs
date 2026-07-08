@@ -212,8 +212,7 @@ fn detect_accept_language_inner() -> Option<String> {
 #[cfg(target_os = "macos")]
 fn chrome_preferences_path() -> Option<std::path::PathBuf> {
     let home = dirs::home_dir()?;
-    let path = home
-        .join("Library/Application Support/Google/Chrome/Default/Preferences");
+    let path = home.join("Library/Application Support/Google/Chrome/Default/Preferences");
     if path.exists() {
         Some(path)
     } else {

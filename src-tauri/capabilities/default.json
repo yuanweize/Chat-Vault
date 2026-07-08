@@ -2,20 +2,36 @@
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
   "description": "Capability for the main window",
-  "windows": ["main"],
+  "windows": [
+    "main"
+  ],
   "permissions": [
     "core:default",
     "core:window:allow-start-dragging",
+    "core:window:allow-show",
+    "core:window:allow-hide",
+    "core:window:allow-close",
+    "core:window:allow-set-focus",
     "dialog:default",
     "opener:default",
     {
       "identifier": "opener:allow-open-url",
-      "allow": [{ "url": "file://**" }]
+      "allow": [
+        {
+          "url": "file://**"
+        }
+      ]
     },
     {
       "identifier": "opener:allow-open-path",
-      "allow": [{ "path": "$APPDATA/**" }]
+      "allow": [
+        {
+          "path": "$APPDATA/**"
+        }
+      ]
     },
-    "log:default"
+    "log:default",
+    "core:tray:default",
+    "fs:default"
   ]
 }

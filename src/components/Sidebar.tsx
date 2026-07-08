@@ -1,12 +1,13 @@
-import { useEffect, useRef, useState, useCallback } from "react";
+import { useEffect, useRef, useState, useCallback, useMemo } from "react";
 import { createPortal } from "react-dom";
 import { invoke } from "@tauri-apps/api/core";
-import { Virtuoso } from "react-virtuoso";
-import { ConversationSummary, Account, SearchResult } from "../data/types";
+import { GroupedVirtuoso } from "react-virtuoso";
+import { ConversationSummary, Account, SearchResult, Folder } from "../data/types";
 import { useTheme } from "../theme";
 import { DRAG_REGION_HEIGHT } from "../utils/platform";
 import { formatDateTime } from "../utils/dateTime";
-import { ImportIcon, ExportIcon, TrashIcon, CopyIcon, CheckIcon, SearchIcon, SyncIcon } from "./Icons";
+import { ImportIcon, ExportIcon, TrashIcon, CopyIcon, CheckIcon, SearchIcon, SyncIcon, FolderIcon, FilterIcon } from "./Icons";
+import { useTranslation } from "react-i18next";
 
 interface SidebarProps {
   conversations: ConversationSummary[];
@@ -34,6 +35,7 @@ interface SidebarProps {
   onSyncConversation?: (id: string) => Promise<void> | void;
   syncingConversationIds?: string[];
   onDeleteConversation?: (convId: string) => void;
+  onMoveToFolder?: (convId: string, folderId: string | null) => void;
   onCancelList?: () => void;
   onCancelFull?: () => void;
 }
@@ -48,12 +50,19 @@ export function Sidebar({
   currentAccount, accounts, onSwitchAccount,
   disableAccountSwitch = false, disableConversationSync = false,
   onSyncConversation, syncingConversationIds = [],
-  onDeleteConversation,
+  onDeleteConversation, onMoveToFolder,
   onCancelList,
   onCancelFull,
 }: SidebarProps) {
-  const t = useTheme();
+  const tTheme = useTheme();
+  const { t } = useTranslation();
   const [showSwitcher, setShowSwitcher] = useState(false);
+  const [folders, setFolders] = useState<Folder[]>([]);
+  const [viewMode, setViewMode] = useState<"timeline" | "folders">("timeline");
+  const [selectedFolderId, setSelectedFolderId] = useState<string | null>(null);
+  const [filterMode, setFilterMode] = useState<"all" | "alive" | "deleted">("all");
+  const [showFilterMenu, setShowFilterMenu] = useState(false);
+  const filterTriggerRef = useRef<HTMLButtonElement | null>(null);
   const switcherTriggerRef = useRef<HTMLDivElement>(null);
   const [switcherRect, setSwitcherRect] = useState<{ left: number; top: number; width: number } | null>(null);
   const updateSwitcherRect = useCallback(() => {
@@ -66,6 +75,25 @@ export function Sidebar({
       width: r.width - 12,
     });
   }, []);
+  const [filterMenuRect, setFilterMenuRect] = useState<{ left: number; top: number; width: number } | null>(null);
+  const updateFilterMenuRect = useCallback(() => {
+    const el = filterTriggerRef.current;
+    if (!el) return;
+    const r = el.getBoundingClientRect();
+    setFilterMenuRect({
+      left: r.left - 100, // Shift left to align
+      top: r.bottom + 8,
+      width: 140,
+    });
+  }, []);
+  useEffect(() => {
+    if (!showFilterMenu) return;
+    updateFilterMenuRect();
+    const onResize = () => updateFilterMenuRect();
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, [showFilterMenu, updateFilterMenuRect]);
+  
   useEffect(() => {
     if (!showSwitcher) return;
     updateSwitcherRect();
@@ -82,7 +110,103 @@ export function Sidebar({
   const searchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const searchInputRef = useRef<HTMLInputElement | null>(null);
   const searchPanelRef = useRef<HTMLDivElement | null>(null);
+
   const syncingSet = new Set(syncingConversationIds);
+
+  useEffect(() => {
+    invoke<Folder[]>("get_folders", { accountId: currentAccount.id })
+      .then(setFolders)
+      .catch(e => console.error("加载文件夹失败:", e));
+  }, [currentAccount.id]);
+
+  async function handleCreateFolder() {
+    const name = window.prompt(t("sidebar.enterFolderName", "请输入新文件夹名称:"));
+    if (!name?.trim()) return;
+    const newFolder: Folder = { id: Date.now().toString(), name: name.trim() };
+    const newFolders = [...folders, newFolder];
+    setFolders(newFolders);
+    await invoke("save_folders", { accountId: currentAccount.id, folders: newFolders });
+  }
+
+  async function handleDeleteFolder(id: string) {
+    if (!window.confirm(t("sidebar.confirmDeleteFolder", "确定要删除此文件夹吗？(该文件夹下的对话不会被删除)"))) return;
+    const newFolders = folders.filter(f => f.id !== id);
+    setFolders(newFolders);
+    await invoke("save_folders", { accountId: currentAccount.id, folders: newFolders });
+    if (selectedFolderId === id) setSelectedFolderId(null);
+  }
+
+  const groupedConversations = useMemo(() => {
+    let filtered = conversations;
+    if (filterMode === "alive") {
+      filtered = filtered.filter(c => c.status !== "lost");
+    } else if (filterMode === "deleted") {
+      filtered = filtered.filter(c => c.status === "lost");
+    }
+    if (selectedFolderId) {
+      filtered = filtered.filter(c => c.folderId === selectedFolderId);
+    }
+
+    if (conversationSortMode !== "created_desc" && conversationSortMode !== "updated_desc") {
+      return { groupCounts: [filtered.length], groupTitles: [""], items: filtered };
+    }
+    
+    const items: ConversationSummary[] = [];
+    const groupTitles: string[] = [];
+    const groupCounts: number[] = [];
+    
+    let currentTitle = "";
+    let currentCount = 0;
+    
+    const now = new Date();
+    const currentYear = now.getFullYear();
+    const currentMonth = now.getMonth();
+    
+    filtered.forEach(conv => {
+      const dateStr = conversationSortMode === "created_desc" && conv.createdAt ? conv.createdAt : conv.updatedAt;
+      let title = t("sidebar.earlier", "更早");
+      if (dateStr) {
+        const d = new Date(dateStr);
+        if (!isNaN(d.getTime())) {
+          const m = d.getMonth();
+          const y = d.getFullYear();
+          if (y === currentYear && m === currentMonth) {
+            title = t("sidebar.this_month", "本月");
+          } else if (y === currentYear && m === currentMonth - 1) {
+            title = t("sidebar.last_month", "上个月");
+          } else if (y === currentYear) {
+            title = t("sidebar.month", { month: m + 1, defaultValue: `${m + 1}月` });
+          } else {
+            title = t("sidebar.yearMonth", { year: y, month: m + 1, defaultValue: `${y}年${m + 1}月` });
+          }
+        }
+      }
+      
+      if (title !== currentTitle) {
+        if (currentCount > 0) {
+          groupTitles.push(currentTitle);
+          groupCounts.push(currentCount);
+        }
+        currentTitle = title;
+        currentCount = 1;
+      } else {
+        currentCount++;
+      }
+      items.push(conv);
+    });
+    
+    if (currentCount > 0) {
+      groupTitles.push(currentTitle);
+      groupCounts.push(currentCount);
+    }
+    
+    // Fallback if empty
+    if (items.length === 0) {
+      return { groupCounts: [], groupTitles: [], items: [] };
+    }
+    
+    return { items, groupTitles, groupCounts };
+  }, [conversations, conversationSortMode, t]);
 
   const doSearch = useCallback(async (q: string) => {
     if (!q.trim()) {
@@ -158,20 +282,20 @@ export function Sidebar({
   const otherAccounts = accounts.filter((a) => a.id !== currentAccount.id);
   const conversationSortTitle =
     conversationSortMode === "size_desc"
-      ? "当前按数量倒序（消息条数），点击切换为按媒体数量倒序"
+      ? t("sidebar.sortTipCount")
       : conversationSortMode === "media_desc"
-        ? "当前按媒体数量倒序，点击切换为按创建时间新到旧"
+        ? t("sidebar.sortTipMedia")
         : conversationSortMode === "created_desc"
-          ? "当前按创建时间新到旧，点击切换为按更新时间新到旧"
-          : "当前按更新时间新到旧，点击切换为按数量倒序（消息条数）";
+          ? t("sidebar.sortTipCreated")
+          : t("sidebar.sortTipUpdated");
   const conversationSortLabel =
     conversationSortMode === "size_desc"
-      ? "数量↓"
+      ? t("sidebar.sortByCount")
       : conversationSortMode === "media_desc"
-        ? "媒体↓"
+        ? t("sidebar.sortByMedia")
         : conversationSortMode === "created_desc"
-          ? "创建↓"
-          : "最新↓";
+          ? t("sidebar.sortByCreated")
+          : t("sidebar.sortByUpdated");
 
   useEffect(() => {
     if (disableAccountSwitch && showSwitcher) {
@@ -188,16 +312,15 @@ export function Sidebar({
 
   return (
     <div
+      id="sidebar-root"
       onClick={() => setContextMenu(null)}
       style={{
       width: collapsed ? 0 : 260,
       minWidth: collapsed ? 0 : 260,
       transition: "width 0.25s cubic-bezier(0.4,0,0.2,1), min-width 0.25s cubic-bezier(0.4,0,0.2,1)",
       overflow: "hidden",
-      background: t.sidebarBg,
-      borderRight: `1px solid ${t.divider}`,
-      backdropFilter: "blur(34px) saturate(112%)",
-      WebkitBackdropFilter: "blur(34px) saturate(112%)",
+      background: tTheme.sidebarBg,
+      borderRight: `2px solid ${tTheme.border}`,
       display: "flex",
       flexDirection: "column",
       flexShrink: 0,
@@ -207,12 +330,12 @@ export function Sidebar({
 
       <div style={{ flex: 1, minHeight: 0, padding: "0 0 4px", minWidth: 260, display: "flex", flexDirection: "column" }}>
         <div style={{ padding: "2px 12px 6px 14px", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
-          <span style={{ fontSize: 11, fontWeight: 600, color: t.textMuted, letterSpacing: 0.5, textTransform: "uppercase" }}>
-            对话历史
+          <span style={{ fontSize: 11, fontWeight: 600, color: tTheme.textMuted, letterSpacing: 0.5, textTransform: "uppercase" }}>
+            {t("sidebar.title")}
           </span>
           <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
             <button
-              title="搜索对话内容"
+              title={t("sidebar.search")}
               onClick={(e) => {
                 e.stopPropagation();
                 setShowSearch(true);
@@ -231,17 +354,17 @@ export function Sidebar({
                 transition: "background 0.12s",
               }}
               onMouseEnter={(e) => {
-                (e.currentTarget as HTMLElement).style.background = t.btnHoverBg;
+                (e.currentTarget as HTMLElement).style.background = tTheme.btnHoverBg;
               }}
               onMouseLeave={(e) => {
                 (e.currentTarget as HTMLElement).style.background = "transparent";
               }}
             >
-              <SearchIcon color={t.textMuted} />
+              <SearchIcon color={tTheme.textMuted} />
             </button>
             {/* 导入按钮 */}
             <button
-              title="导入 ZIP 压缩包到当前账号"
+              title={t("sidebar.importZip")}
               onClick={(e) => {
                 e.stopPropagation();
                 onImport?.();
@@ -261,17 +384,17 @@ export function Sidebar({
                 transition: "background 0.12s",
               }}
               onMouseEnter={(e) => {
-                if (!importingAccountData) (e.currentTarget as HTMLElement).style.background = t.btnHoverBg;
+                if (!importingAccountData) (e.currentTarget as HTMLElement).style.background = tTheme.btnHoverBg;
               }}
               onMouseLeave={(e) => {
                 (e.currentTarget as HTMLElement).style.background = "transparent";
               }}
             >
-              <ImportIcon spinning={importingAccountData} color={importingAccountData ? "#0071e3" : t.textMuted} />
+              <ImportIcon spinning={importingAccountData} color={importingAccountData ? "#0071e3" : tTheme.textMuted} />
             </button>
             {/* 导出按钮 */}
             <button
-              title="导出当前账号数据"
+              title={t("sidebar.exportAccount")}
               onClick={(e) => {
                 e.stopPropagation();
                 onOpenExportModal?.();
@@ -291,13 +414,43 @@ export function Sidebar({
                 transition: "background 0.12s",
               }}
               onMouseEnter={(e) => {
-                if (!exportingAccountData) (e.currentTarget as HTMLElement).style.background = t.btnHoverBg;
+                if (!exportingAccountData) (e.currentTarget as HTMLElement).style.background = tTheme.btnHoverBg;
               }}
               onMouseLeave={(e) => {
                 (e.currentTarget as HTMLElement).style.background = "transparent";
               }}
             >
-              <ExportIcon spinning={exportingAccountData} color={exportingAccountData ? "#0071e3" : t.textMuted} />
+              <ExportIcon spinning={exportingAccountData} color={exportingAccountData ? "#0071e3" : tTheme.textMuted} />
+            </button>
+            <button
+              ref={filterTriggerRef}
+              onClick={(e) => {
+                e.stopPropagation();
+                setShowFilterMenu(true);
+              }}
+              title={t("sidebar.filterAndStatus")}
+              style={{
+                width: 22,
+                height: 22,
+                borderRadius: 6,
+                border: "none",
+                background: "transparent",
+                cursor: "pointer",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                flexShrink: 0,
+                color: (filterMode !== "all" || selectedFolderId) ? "#0071e3" : tTheme.textMuted,
+                transition: "background 0.12s",
+              }}
+              onMouseEnter={(e) => {
+                (e.currentTarget as HTMLElement).style.background = tTheme.btnHoverBg;
+              }}
+              onMouseLeave={(e) => {
+                (e.currentTarget as HTMLElement).style.background = "transparent";
+              }}
+            >
+              <FilterIcon color={(filterMode !== "all" || selectedFolderId) ? "#0071e3" : tTheme.textMuted} />
             </button>
             <button
               onClick={(e) => {
@@ -316,14 +469,14 @@ export function Sidebar({
                 justifyContent: "center",
                 flexShrink: 0,
                 padding: "0 6px",
-                color: t.textMuted,
+                color: tTheme.textMuted,
                 fontSize: 10.5,
                 fontWeight: 700,
                 letterSpacing: 0.2,
                 transition: "background 0.12s",
               }}
               onMouseEnter={(e) => {
-                (e.currentTarget as HTMLElement).style.background = t.btnHoverBg;
+                (e.currentTarget as HTMLElement).style.background = tTheme.btnHoverBg;
               }}
               onMouseLeave={(e) => {
                 (e.currentTarget as HTMLElement).style.background = "transparent";
@@ -337,7 +490,7 @@ export function Sidebar({
                 if (clearingAccountData || disableClearAccountData) return;
                 onClearAccountData();
               }}
-              title="清空当前账号数据"
+              title={t("sidebar.clearAccount")}
               style={{
                 width: 22,
                 height: 22,
@@ -354,16 +507,65 @@ export function Sidebar({
               }}
               onMouseEnter={(e) => {
                 if (clearingAccountData || disableClearAccountData) return;
-                (e.currentTarget as HTMLElement).style.background = t.btnHoverBg;
+                (e.currentTarget as HTMLElement).style.background = tTheme.btnHoverBg;
               }}
               onMouseLeave={(e) => {
                 (e.currentTarget as HTMLElement).style.background = "transparent";
               }}
             >
-              <TrashIcon color={clearingAccountData ? "#d34b4b" : t.textMuted} />
+              <TrashIcon color={clearingAccountData ? "#d34b4b" : tTheme.textMuted} />
             </button>
           </div>
         </div>
+        {/* 过滤弹窗 */}
+        {showFilterMenu && filterMenuRect && createPortal(
+          <>
+            <div
+              style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, zIndex: 9998 }}
+              onClick={(e) => { e.stopPropagation(); setShowFilterMenu(false); }}
+              onContextMenu={(e) => { e.preventDefault(); setShowFilterMenu(false); }}
+            />
+            <div style={{
+              position: "fixed",
+              top: filterMenuRect.top,
+              left: filterMenuRect.left,
+              width: filterMenuRect.width,
+              background: tTheme.cardBg,
+              border: `2px solid ${tTheme.border}`,
+              borderRadius: 4,
+              padding: "4px 0",
+              zIndex: 9999,
+              fontSize: 12,
+              color: tTheme.text,
+            }}>
+              <div style={{ padding: "4px 12px", color: tTheme.textMuted, fontSize: 10, fontWeight: 600 }}>{t("sidebar.filterStatus")}</div>
+              <div
+                style={{ padding: "6px 12px", cursor: "pointer", background: filterMode === "all" ? tTheme.hover : "transparent" }}
+                onClick={() => { setFilterMode("all"); setShowFilterMenu(false); }}
+              >{t("sidebar.filterAll")}</div>
+              <div
+                style={{ padding: "6px 12px", cursor: "pointer", background: filterMode === "alive" ? tTheme.hover : "transparent" }}
+                onClick={() => { setFilterMode("alive"); setShowFilterMenu(false); }}
+              >{t("sidebar.filterAlive")}</div>
+              <div
+                style={{ padding: "6px 12px", cursor: "pointer", background: filterMode === "deleted" ? tTheme.hover : "transparent" }}
+                onClick={() => { setFilterMode("deleted"); setShowFilterMenu(false); }}
+              >{t("sidebar.filterZombie")}</div>
+
+              <div style={{ margin: "4px 0", borderTop: `1px solid ${tTheme.border}` }} />
+              <div style={{ padding: "4px 12px", color: tTheme.textMuted, fontSize: 10, fontWeight: 600 }}>{t("sidebar.folderView")}</div>
+              <div
+                style={{ padding: "6px 12px", cursor: "pointer", background: viewMode === "timeline" ? tTheme.hover : "transparent" }}
+                onClick={() => { setViewMode("timeline"); setShowFilterMenu(false); }}
+              >{t("sidebar.timelineView")}</div>
+              <div
+                style={{ padding: "6px 12px", cursor: "pointer", background: viewMode === "folders" ? tTheme.hover : "transparent" }}
+                onClick={() => { setViewMode("folders"); setShowFilterMenu(false); }}
+              >{t("sidebar.folderManagement")}</div>
+            </div>
+          </>,
+          document.body
+        )}
         {/* 搜索弹窗 — Portal 到 body，全屏居中 */}
         {showSearch && createPortal(
           <div style={{
@@ -373,7 +575,7 @@ export function Sidebar({
             right: 0,
             bottom: 0,
             zIndex: 9000,
-            background: t.isDark ? "rgba(0,0,0,0.5)" : "rgba(0,0,0,0.22)",
+            background: tTheme.isDark ? "rgba(0,0,0,0.5)" : "rgba(0,0,0,0.22)",
             display: "flex",
             alignItems: "center",
             justifyContent: "center",
@@ -384,34 +586,31 @@ export function Sidebar({
                 width: 480,
                 maxWidth: "90vw",
                 maxHeight: "70vh",
-                borderRadius: 14,
-                background: t.isDark ? "rgba(36,38,46,0.88)" : "rgba(255,255,255,0.85)",
-                border: `1px solid ${t.divider}`,
-                backdropFilter: "blur(40px) saturate(130%)",
-                WebkitBackdropFilter: "blur(40px) saturate(130%)",
-                boxShadow: t.isDark ? "0 16px 48px rgba(0,0,0,0.55)" : "0 16px 48px rgba(80,104,146,0.28)",
+                borderRadius: 8,
+                background: tTheme.cardBg,
+                border: `2px solid ${tTheme.border}`,
                 display: "flex",
                 flexDirection: "column",
                 overflow: "hidden",
               }}
             >
               <div style={{ padding: "14px 14px 8px", position: "relative" }}>
-                <SearchIcon color={t.textMuted} style={{ position: "absolute", left: 24, top: "50%", transform: "translateY(-50%)", pointerEvents: "none" }} />
-                <style>{`.search-input::placeholder { color: ${t.textMuted}; opacity: 1; }`}</style>
+                <SearchIcon color={tTheme.textMuted} style={{ position: "absolute", left: 24, top: "50%", transform: "translateY(-50%)", pointerEvents: "none" }} />
+                <style>{`.search-input::placeholder { color: ${tTheme.textMuted}; opacity: 1; }`}</style>
                 <input
                   ref={searchInputRef}
                   className="search-input"
                   type="text"
-                  placeholder="搜索对话内容..."
+                  placeholder={t("sidebar.searchPlaceholder", "搜索对话内容...")}
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
                   style={{
                     width: "100%",
                     height: 36,
                     borderRadius: 10,
-                    border: `1px solid ${t.divider}`,
-                    background: t.isDark ? "rgba(255,255,255,0.12)" : "rgba(0,0,0,0.06)",
-                    color: t.text,
+                    border: `1px solid ${tTheme.divider}`,
+                    background: tTheme.isDark ? "rgba(255,255,255,0.12)" : "rgba(0,0,0,0.06)",
+                    color: tTheme.text,
                     fontSize: 13,
                     paddingLeft: 32,
                     paddingRight: searchQuery ? 30 : 10,
@@ -422,7 +621,7 @@ export function Sidebar({
                 {searchQuery && (
                   <button
                     onClick={() => setSearchQuery("")}
-                    style={{ position: "absolute", right: 18, top: "50%", transform: "translateY(-50%)", width: 20, height: 20, borderRadius: 6, border: "none", background: "transparent", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", color: t.textMuted, fontSize: 15 }}
+                    style={{ position: "absolute", right: 18, top: "50%", transform: "translateY(-50%)", width: 20, height: 20, borderRadius: 6, border: "none", background: "transparent", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", color: tTheme.textMuted, fontSize: 15 }}
                   >
                     ×
                   </button>
@@ -431,9 +630,9 @@ export function Sidebar({
               <div style={{ flex: 1, minHeight: 0, overflowY: "auto", padding: "0 8px 8px" }}>
                 {searchQuery.trim() ? (
                   searching ? (
-                    <div style={{ padding: "12px 8px", fontSize: 13, color: t.textMuted }}>搜索中...</div>
+                    <div style={{ padding: "12px 8px", fontSize: 13, color: tTheme.textMuted }}>{t("sidebar.searching", "搜索中...")}</div>
                   ) : searchResults.length === 0 ? (
-                    <div style={{ padding: "12px 8px", fontSize: 13, color: t.textMuted }}>无匹配结果</div>
+                    <div style={{ padding: "12px 8px", fontSize: 13, color: tTheme.textMuted }}>{t("sidebar.noSearchResults", "无匹配结果")}</div>
                   ) : (
                     searchResults.map((r, i) => (
                       <div
@@ -452,52 +651,105 @@ export function Sidebar({
                           background: "transparent",
                           transition: "background 0.12s",
                         }}
-                        onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.background = t.hover; }}
+                        onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.background = tTheme.hover; }}
                         onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.background = "transparent"; }}
                       >
-                        <div style={{ fontSize: 13, fontWeight: 600, color: t.text, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", marginBottom: 4 }}>
+                        <div style={{ fontSize: 13, fontWeight: 600, color: tTheme.text, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", marginBottom: 4 }}>
                           {r.title || r.conversationId}
                         </div>
                         <div
-                          style={{ fontSize: 12, color: t.textMuted, lineHeight: 1.5, overflow: "hidden", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical" }}
+                          style={{ fontSize: 12, color: tTheme.textMuted, lineHeight: 1.5, overflow: "hidden", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical" }}
                           dangerouslySetInnerHTML={{ __html: r.snippet }}
                         />
                       </div>
                     ))
                   )
                 ) : (
-                  <div style={{ padding: "12px 8px", fontSize: 13, color: t.textMuted }}>输入关键词搜索对话内容</div>
+                  <div style={{ padding: "12px 8px", fontSize: 13, color: tTheme.textMuted }}>{t("sidebar.inputKeyword", "输入关键词搜索对话内容")}</div>
                 )}
               </div>
             </div>
           </div>,
           document.body
         )}
-        {conversations.length === 0 ? (
-          <div style={{ padding: "10px 14px", fontSize: 12, color: t.textMuted }}>
-            暂无列表数据，点击底部列表同步按钮拉取
+        {viewMode === "folders" ? (
+          <div style={{ flex: 1, overflowY: "auto", padding: "10px" }}>
+            <button
+              onClick={handleCreateFolder}
+              style={{ width: "100%", padding: "8px", background: tTheme.btnHoverBg, border: "none", borderRadius: 8, cursor: "pointer", color: tTheme.text, marginBottom: 10, fontSize: 13, fontWeight: 500 }}
+            >
+              {t("sidebar.newFolder", "+ 新建文件夹")}
+            </button>
+            <div
+              style={{ display: "flex", alignItems: "center", padding: "10px 12px", background: selectedFolderId === null ? tTheme.selectedBg : "transparent", cursor: "pointer", borderRadius: 8, marginBottom: 4 }}
+              onClick={() => { setSelectedFolderId(null); setViewMode("timeline"); }}
+            >
+              <FolderIcon color={tTheme.textMuted} />
+              <span style={{ color: tTheme.text, fontSize: 13, marginLeft: 8 }}>{t("sidebar.allConversations", "全部对话 (不过滤)")}</span>
+            </div>
+            {folders.map(f => (
+               <div
+                 key={f.id}
+                 style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 12px", background: selectedFolderId === f.id ? tTheme.selectedBg : "transparent", cursor: "pointer", borderRadius: 8, transition: "background 0.12s" }}
+                 onClick={() => { setSelectedFolderId(f.id); setViewMode("timeline"); }}
+                 onMouseEnter={(e) => { if (selectedFolderId !== f.id) (e.currentTarget as HTMLElement).style.background = tTheme.hover; }}
+                 onMouseLeave={(e) => { if (selectedFolderId !== f.id) (e.currentTarget as HTMLElement).style.background = "transparent"; }}
+               >
+                 <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                   <FolderIcon color={f.color || tTheme.textMuted} />
+                   <span style={{ color: tTheme.text, fontSize: 13 }}>{f.name}</span>
+                 </div>
+                 <button
+                   onClick={(e) => { e.stopPropagation(); handleDeleteFolder(f.id); }}
+                   style={{ background: "transparent", border: "none", color: "#ef4444", cursor: "pointer", fontSize: 12 }}
+                   title={t("sidebar.deleteFolder", "删除文件夹")}
+                 >
+                   {t("sidebar.delete", "删除")}
+                 </button>
+               </div>
+            ))}
+            {folders.length === 0 && (
+              <div style={{ padding: "20px", textAlign: "center", fontSize: 12, color: tTheme.textMuted }}>
+                {t("sidebar.noFolders", "暂无文件夹，点击上方新建")}
+              </div>
+            )}
+          </div>
+        ) : conversations.length === 0 ? (
+          <div style={{ padding: "10px 14px", fontSize: 12, color: tTheme.textMuted }}>
+            {t("sidebar.noDataPull", "暂无列表数据，点击底部列表同步按钮拉取")}
           </div>
         ) : (
           <div style={{ flex: 1, minHeight: 0 }}>
-            <Virtuoso
+            <GroupedVirtuoso
               style={{ height: "100%", scrollbarGutter: "stable" }}
-              data={conversations}
-              computeItemKey={(_, conv) => conv.id}
+              groupCounts={groupedConversations.groupCounts}
               increaseViewportBy={{ top: 220, bottom: 420 }}
-              itemContent={(_, conv) => (
-                <ConversationItem
-                  conversation={conv}
-                  selected={conv.id === selectedId}
-                  onClick={() => onSelect(conv.id)}
-                  syncing={syncingSet.has(conv.id)}
-                  onSync={() => handleSyncConv(conv.id)}
-                  sortMode={conversationSortMode}
-                  onContextMenu={(e) => {
-                    e.preventDefault();
-                    setContextMenu({ x: e.clientX, y: e.clientY, convId: conv.id });
-                  }}
-                />
-              )}
+              groupContent={(index) => {
+                const title = groupedConversations.groupTitles[index];
+                if (!title) return null;
+                return (
+                  <div style={{ padding: "12px 14px 4px", fontSize: 12, fontWeight: 600, color: tTheme.textMuted, background: tTheme.cardBg, position: "relative", zIndex: 10 }}>
+                    {title}
+                  </div>
+                );
+              }}
+              itemContent={(index) => {
+                const conv = groupedConversations.items[index];
+                return (
+                  <ConversationItem
+                    conversation={conv}
+                    selected={conv.id === selectedId}
+                    onClick={() => onSelect(conv.id)}
+                    syncing={syncingSet.has(conv.id)}
+                    onSync={() => handleSyncConv(conv.id)}
+                    sortMode={conversationSortMode}
+                    onContextMenu={(e) => {
+                      e.preventDefault();
+                      setContextMenu({ x: e.clientX, y: e.clientY, convId: conv.id });
+                    }}
+                  />
+                );
+              }}
             />
           </div>
         )}
@@ -523,14 +775,11 @@ export function Sidebar({
               top: switcherRect.top,
               width: switcherRect.width,
               transform: "translateY(-100%)",
-              borderRadius: 10,
-              background: t.cardBg,
-              border: "none",
-              backdropFilter: "blur(28px) saturate(115%)",
-              WebkitBackdropFilter: "blur(28px) saturate(115%)",
+              borderRadius: 4,
+              background: tTheme.cardBg,
+              border: `2px solid ${tTheme.border}`,
               overflow: "hidden",
               zIndex: 2000,
-              boxShadow: t.isDark ? "0 -8px 22px rgba(3,8,18,0.5)" : "0 -8px 22px rgba(80,104,146,0.18)",
             }}
           >
             {otherAccounts.map((account) => (
@@ -542,7 +791,7 @@ export function Sidebar({
                   setShowSwitcher(false);
                 }}
                 style={{ display: "flex", width: "100%", alignItems: "center", gap: 10, padding: "8px 10px", border: "none", background: "transparent", cursor: disableAccountSwitch ? "default" : "pointer", textAlign: "left", transition: "background 0.1s", opacity: disableAccountSwitch ? 0.6 : 1 }}
-                onMouseEnter={(e) => { if (!disableAccountSwitch) (e.currentTarget as HTMLElement).style.background = t.hover; }}
+                onMouseEnter={(e) => { if (!disableAccountSwitch) (e.currentTarget as HTMLElement).style.background = tTheme.hover; }}
                 onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.background = "transparent"; }}
               >
                 <div style={{ width: 28, height: 28, borderRadius: "50%", background: account.avatarColor, display: "flex", alignItems: "center", justifyContent: "center", color: "#fff", fontWeight: 700, fontSize: 12, flexShrink: 0 }}>
@@ -550,12 +799,12 @@ export function Sidebar({
                 </div>
                 <div style={{ flex: 1, overflow: "hidden" }}>
                   <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                    <div style={{ fontSize: 13, fontWeight: 500, color: t.text, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    <div style={{ fontSize: 13, fontWeight: 500, color: tTheme.text, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                       {account.name}
                     </div>
                     {account.listSyncPending && <PendingDot />}
                   </div>
-                  <div style={{ fontSize: 11, color: t.textSub, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{account.email}</div>
+                  <div style={{ fontSize: 11, color: tTheme.textSub, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{account.email}</div>
                 </div>
               </button>
             ))}
@@ -566,7 +815,7 @@ export function Sidebar({
         <div style={{
           position: "relative",
           borderRadius: 10,
-          background: showSwitcher ? t.hover : "transparent",
+          background: showSwitcher ? tTheme.hover : "transparent",
           transition: "background 0.12s",
           display: "flex",
           alignItems: "center",
@@ -581,21 +830,16 @@ export function Sidebar({
                 left: 0,
                 right: 0,
                 marginBottom: 4,
-                borderRadius: 10,
-                background: t.cardBg,
-                border: `1px solid ${t.divider}`,
-                backdropFilter: "blur(28px) saturate(115%)",
-                WebkitBackdropFilter: "blur(28px) saturate(115%)",
-                boxShadow: t.isDark
-                  ? "0 -6px 18px rgba(3,8,18,0.5)"
-                  : "0 -6px 18px rgba(80,104,146,0.18)",
+                borderRadius: 4,
+                background: tTheme.cardBg,
+                border: `2px solid ${tTheme.border}`,
                 padding: "10px 12px",
                 zIndex: 200,
               }}
               onClick={(e) => e.stopPropagation()}
             >
-              <div style={{ fontSize: 12, color: t.text, marginBottom: 8 }}>
-                {cancelConfirm === "list" ? "终止同步？" : "终止同步？"}
+              <div style={{ fontSize: 12, color: tTheme.text, marginBottom: 8 }}>
+                {cancelConfirm === "list" ? t("sidebar.cancelSync", "终止同步？") : t("sidebar.cancelSync", "终止同步？")}
               </div>
               <div style={{ display: "flex", gap: 6 }}>
                 <button
@@ -610,18 +854,18 @@ export function Sidebar({
                     fontSize: 12, fontWeight: 600, cursor: "pointer",
                   }}
                 >
-                  终止
+                  {t("sidebar.cancel", "终止")}
                 </button>
                 <button
                   onClick={(e) => { e.stopPropagation(); setCancelConfirm(null); }}
                   style={{
                     flex: 1, height: 26, borderRadius: 6,
-                    border: `1px solid ${t.divider}`,
-                    background: "transparent", color: t.text,
+                    border: `1px solid ${tTheme.divider}`,
+                    background: "transparent", color: tTheme.text,
                     fontSize: 12, cursor: "pointer",
                   }}
                 >
-                  继续
+                  {t("sidebar.continue", "继续")}
                 </button>
               </div>
             </div>
@@ -630,7 +874,7 @@ export function Sidebar({
             {currentAccount.avatarText}
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 6, flex: 1, minWidth: 0 }}>
-            <span style={{ fontSize: 13, fontWeight: 500, color: t.text, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+            <span style={{ fontSize: 13, fontWeight: 500, color: tTheme.text, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
               {currentAccount.name}
             </span>
             {currentAccount.listSyncPending && <PendingDot />}
@@ -644,7 +888,7 @@ export function Sidebar({
               }
               if (!fullSyncing) onSyncList();
             }}
-            title={listSyncing ? "点击终止列表同步" : "同步列表"}
+            title={listSyncing ? t("sidebar.stopListSync") : t("sidebar.syncList")}
             style={{
               height: 22,
               borderRadius: 6,
@@ -656,20 +900,20 @@ export function Sidebar({
               gap: 4,
               padding: "0 3px",
               flexShrink: 0,
-              color: listSyncing ? "#0071e3" : t.textSub,
+              color: listSyncing ? "#0071e3" : tTheme.textSub,
               opacity: fullSyncing && !listSyncing ? 0.65 : 1,
               transition: "background 0.12s",
             }}
             onMouseEnter={(e) => {
               e.stopPropagation();
-              if (listSyncing || !fullSyncing) (e.currentTarget as HTMLElement).style.background = t.btnHoverBg;
+              if (listSyncing || !fullSyncing) (e.currentTarget as HTMLElement).style.background = tTheme.btnHoverBg;
             }}
             onMouseLeave={(e) => {
               (e.currentTarget as HTMLElement).style.background = "transparent";
             }}
           >
             <span style={{ fontSize: 11, fontWeight: 700, lineHeight: 1, letterSpacing: 0.4 }}>List</span>
-            <SyncIcon spinning={listSyncing} color={listSyncing ? "#0071e3" : t.textSub} small />
+            <SyncIcon spinning={listSyncing} color={listSyncing ? "#0071e3" : tTheme.textSub} small />
           </button>
           <button
             onClick={(e) => {
@@ -680,7 +924,7 @@ export function Sidebar({
               }
               if (!listSyncing) onSyncFull();
             }}
-            title={fullSyncing ? "点击终止完全同步" : "完全同步（先列表后逐会话）"}
+            title={fullSyncing ? t("sidebar.stopFullSync", "点击终止全量同步") : t("sidebar.syncFull", "全量同步")}
             style={{
               height: 22,
               borderRadius: 6,
@@ -692,20 +936,20 @@ export function Sidebar({
               gap: 4,
               padding: "0 3px",
               flexShrink: 0,
-              color: fullSyncing ? "#0071e3" : t.textSub,
+              color: fullSyncing ? "#0071e3" : tTheme.textSub,
               opacity: listSyncing && !fullSyncing ? 0.65 : 1,
               transition: "background 0.12s",
             }}
             onMouseEnter={(e) => {
               e.stopPropagation();
-              if (fullSyncing || !listSyncing) (e.currentTarget as HTMLElement).style.background = t.btnHoverBg;
+              if (fullSyncing || !listSyncing) (e.currentTarget as HTMLElement).style.background = tTheme.btnHoverBg;
             }}
             onMouseLeave={(e) => {
               (e.currentTarget as HTMLElement).style.background = "transparent";
             }}
           >
             <span style={{ fontSize: 11, fontWeight: 700, lineHeight: 1, letterSpacing: 0.4 }}>ALL</span>
-            <SyncIcon spinning={fullSyncing} color={fullSyncing ? "#0071e3" : t.textSub} small />
+            <SyncIcon spinning={fullSyncing} color={fullSyncing ? "#0071e3" : tTheme.textSub} small />
           </button>
         </div>
       </div>
@@ -716,12 +960,11 @@ export function Sidebar({
             top: contextMenu.y,
             left: contextMenu.x,
             zIndex: 3000,
-            background: t.isDark ? "#1c1f25" : "#ffffff",
-            borderRadius: 8,
-            border: `1px solid ${t.divider}`,
+            background: tTheme.cardBg,
+            borderRadius: 4,
+            border: `2px solid ${tTheme.border}`,
             padding: "4px 0",
             minWidth: 140,
-            boxShadow: "0 4px 16px rgba(0,0,0,0.18)",
           }}
           onClick={(e) => e.stopPropagation()}
         >
@@ -742,8 +985,59 @@ export function Sidebar({
               cursor: "pointer",
             }}
           >
-            删除此对话
+            {t("sidebar.deleteConversation")}
           </button>
+          {folders.length > 0 && (
+            <>
+              <div style={{ margin: "4px 0", borderTop: `1px solid ${tTheme.divider}` }} />
+              <div style={{ padding: "4px 14px", fontSize: 11, color: tTheme.textMuted, fontWeight: 600 }}>{t("sidebar.moveToFolder")}</div>
+              {folders.map(f => (
+                <button
+                  key={f.id}
+                  onClick={() => {
+                    onMoveToFolder?.(contextMenu.convId, f.id);
+                    setContextMenu(null);
+                  }}
+                  style={{
+                    display: "block",
+                    width: "100%",
+                    padding: "6px 14px",
+                    border: "none",
+                    background: "transparent",
+                    color: tTheme.text,
+                    fontSize: 13,
+                    textAlign: "left",
+                    cursor: "pointer",
+                  }}
+                  onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.background = tTheme.hover; }}
+                  onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.background = "transparent"; }}
+                >
+                  {f.name}
+                </button>
+              ))}
+              <button
+                onClick={() => {
+                  onMoveToFolder?.(contextMenu.convId, null);
+                  setContextMenu(null);
+                }}
+                style={{
+                  display: "block",
+                  width: "100%",
+                  padding: "6px 14px",
+                  border: "none",
+                  background: "transparent",
+                  color: tTheme.textMuted,
+                  fontSize: 13,
+                  textAlign: "left",
+                  cursor: "pointer",
+                }}
+                onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.background = tTheme.hover; }}
+                onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.background = "transparent"; }}
+              >
+                {t("sidebar.removeFromFolder")}
+              </button>
+            </>
+          )}
         </div>
       )}
     </div>

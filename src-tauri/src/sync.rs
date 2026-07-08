@@ -22,7 +22,8 @@ impl CancellationToken {
     }
 
     pub fn cancel(&self) {
-        self.cancelled.store(true, std::sync::atomic::Ordering::SeqCst);
+        self.cancelled
+            .store(true, std::sync::atomic::Ordering::SeqCst);
     }
 
     pub fn is_cancelled(&self) -> bool {
@@ -77,7 +78,10 @@ impl GeminiExporter {
         std::fs::create_dir_all(&conv_dir).str_err()?;
         std::fs::create_dir_all(&media_dir).str_err()?;
 
-        log::info!("仅同步列表，账号: {}", crate::protocol::mask_email(account_id));
+        log::info!(
+            "仅同步列表，账号: {}",
+            crate::protocol::mask_email(account_id)
+        );
 
         let (existing_order, existing_index) = storage::load_conversations_index(&account_dir);
         let sync_state = storage::load_sync_state(&account_dir);
@@ -187,9 +191,8 @@ impl GeminiExporter {
                 }
 
                 let remote_ts = chat.latest_update_ts;
-                let local_ts = summary_to_epoch_seconds(
-                    existing_index.get(&bare_id).unwrap_or(&Value::Null),
-                );
+                let local_ts =
+                    summary_to_epoch_seconds(existing_index.get(&bare_id).unwrap_or(&Value::Null));
 
                 if let (Some(r_ts), Some(l_ts)) = (remote_ts, local_ts) {
                     if r_ts > l_ts {
@@ -299,7 +302,12 @@ fn persist_list_state(
 
     let summaries: Vec<Value> = if phase == "done" {
         if stopped_early {
-            build_partial_summaries(fetched_order, conv_index, existing_index, baseline_existing_ids)
+            build_partial_summaries(
+                fetched_order,
+                conv_index,
+                existing_index,
+                baseline_existing_ids,
+            )
         } else {
             let total_cap = fetched_order.len() + baseline_existing_ids.len();
             let mut result = Vec::with_capacity(total_cap);
@@ -320,7 +328,12 @@ fn persist_list_state(
             result
         }
     } else {
-        build_partial_summaries(fetched_order, conv_index, existing_index, baseline_existing_ids)
+        build_partial_summaries(
+            fetched_order,
+            conv_index,
+            existing_index,
+            baseline_existing_ids,
+        )
     };
 
     let listing_cursor = if phase == "done" { None } else { cursor };
@@ -338,8 +351,7 @@ fn persist_list_state(
         .cloned()
         .unwrap_or_default();
 
-    storage::write_conversations_index(account_dir, account_id, &now_iso, &summaries)
-        .str_err()?;
+    storage::write_conversations_index(account_dir, account_id, &now_iso, &summaries).str_err()?;
     storage::write_sync_state(
         account_dir,
         &json!({
@@ -423,15 +435,12 @@ impl GeminiExporter {
 
         // 如果有外部指定的 account_id
         if let Some(ref override_id) = self.account_id_override {
-            let email = self
-                .account_email_override
-                .clone()
-                .or_else(|| {
-                    self.user_spec
-                        .as_ref()
-                        .filter(|s| s.contains('@'))
-                        .map(|s| s.to_lowercase())
-                });
+            let email = self.account_email_override.clone().or_else(|| {
+                self.user_spec
+                    .as_ref()
+                    .filter(|s| s.contains('@'))
+                    .map(|s| s.to_lowercase())
+            });
             let name = email
                 .as_ref()
                 .map(|e| e.split('@').next().unwrap_or("").to_string())
@@ -520,10 +529,7 @@ impl GeminiExporter {
         }
 
         // 兜底
-        let authuser = self
-            .authuser
-            .clone()
-            .unwrap_or_else(|| "0".to_string());
+        let authuser = self.authuser.clone().unwrap_or_else(|| "0".to_string());
         let acc_id = format!("user_{}", authuser);
         Ok(json!({
             "id": acc_id,
@@ -573,12 +579,20 @@ impl GeminiExporter {
         // 失败媒体重试
         let mut pre_stats = DownloadStats::default();
         let retry_result = self
-            .retry_failed_media_for_conversation(&jsonl_file, &account_dir, &media_dir, &mut pre_stats)
+            .retry_failed_media_for_conversation(
+                &jsonl_file,
+                &account_dir,
+                &media_dir,
+                &mut pre_stats,
+            )
             .await;
         if retry_result.attempted > 0 || retry_result.missing_url > 0 {
             log::info!(
                 "  [media-retry] attempted={}, recovered={}, failed={}, missing_url={}",
-                retry_result.attempted, retry_result.recovered, retry_result.failed, retry_result.missing_url
+                retry_result.attempted,
+                retry_result.recovered,
+                retry_result.failed,
+                retry_result.missing_url
             );
         }
 
@@ -660,8 +674,12 @@ impl GeminiExporter {
                     raw_turns.len() * 2
                 };
                 update_intermediate_message_count(
-                    &account_dir, &account_id, &bare_id,
-                    &existing_index, estimated_count, &existing_summary,
+                    &account_dir,
+                    &account_id,
+                    &bare_id,
+                    &existing_index,
+                    estimated_count,
+                    &existing_summary,
                 );
             }
 
@@ -782,10 +800,11 @@ impl GeminiExporter {
         let state_obj = state.as_object_mut().unwrap();
         state_obj.insert("updatedAt".into(), json!(now_iso));
         // 移除已完成的 pending entry
-        if let Some(pending) = state_obj.get_mut("pendingConversations").and_then(|v| v.as_array_mut()) {
-            pending.retain(|item| {
-                item.get("id").and_then(|v| v.as_str()) != Some(&bare_id)
-            });
+        if let Some(pending) = state_obj
+            .get_mut("pendingConversations")
+            .and_then(|v| v.as_array_mut())
+        {
+            pending.retain(|item| item.get("id").and_then(|v| v.as_str()) != Some(&bare_id));
         }
         storage::write_sync_state(&account_dir, &state).str_err()?;
 
@@ -829,19 +848,33 @@ impl GeminiExporter {
             global_used_names,
         );
 
-        let rows = storage::turns_to_jsonl_rows(&parsed_turns, conv_id, account_id, title, chat_info, media_dir);
+        let rows = storage::turns_to_jsonl_rows(
+            &parsed_turns,
+            conv_id,
+            account_id,
+            title,
+            chat_info,
+            media_dir,
+        );
         storage::write_jsonl_rows(jsonl_file, &rows).str_err()?;
+
+        // Generate Markdown export
+        let md_file = account_dir
+            .join("exports")
+            .join("markdown")
+            .join(format!("{}.md", bare_id));
+        let _ = crate::export_md::generate_markdown_from_rows(&rows, &md_file);
 
         let mut failed_items = Vec::new();
         if !batch_list.is_empty() {
             log::info!("  媒体文件: {} 个（去重后）", batch_list.len());
             failed_items = self.download_media_batch(&batch_list, media_stats).await;
-            storage::save_media_manifest(account_dir, global_seen_urls)
-                .str_err()?;
+            storage::save_media_manifest(account_dir, global_seen_urls).str_err()?;
         }
 
         // 更新媒体失败标记
-        let batch_media_ids: HashSet<String> = batch_list.iter().map(|i| i.media_id.clone()).collect();
+        let batch_media_ids: HashSet<String> =
+            batch_list.iter().map(|i| i.media_id.clone()).collect();
         let failed_map: HashMap<String, String> = failed_items
             .iter()
             .map(|i| (i.media_id.clone(), i.error.clone()))
@@ -904,8 +937,14 @@ impl GeminiExporter {
             global_used_names,
         );
 
-        let new_rows_full =
-            storage::turns_to_jsonl_rows(&parsed_new_turns, conv_id, account_id, title, chat_info, media_dir);
+        let new_rows_full = storage::turns_to_jsonl_rows(
+            &parsed_new_turns,
+            conv_id,
+            account_id,
+            title,
+            chat_info,
+            media_dir,
+        );
         let new_meta = &new_rows_full[0];
         let new_msg_rows = &new_rows_full[1..];
 
@@ -926,7 +965,10 @@ impl GeminiExporter {
                 };
                 if !meta_found && row.get("type").and_then(|v| v.as_str()) == Some("meta") {
                     meta_found = true;
-                    existing_created_at = row.get("createdAt").and_then(|v| v.as_str()).map(|s| s.to_string());
+                    existing_created_at = row
+                        .get("createdAt")
+                        .and_then(|v| v.as_str())
+                        .map(|s| s.to_string());
                     continue;
                 }
                 existing_msg_rows.push(row);
@@ -935,8 +977,7 @@ impl GeminiExporter {
 
         // 合并
         let (merged_msg_rows, removed_msg_rows) =
-            storage::merge_message_rows_for_write(new_msg_rows, &existing_msg_rows)
-                .str_err()?;
+            storage::merge_message_rows_for_write(new_msg_rows, &existing_msg_rows).str_err()?;
         if removed_msg_rows > 0 {
             log::info!("  [dedupe] 合并写盘去重: {} 行", removed_msg_rows);
         }
@@ -952,15 +993,22 @@ impl GeminiExporter {
         all_rows.extend(merged_msg_rows);
         storage::write_jsonl_rows(jsonl_file, &all_rows).str_err()?;
 
+        // Generate Markdown export
+        let md_file = account_dir
+            .join("exports")
+            .join("markdown")
+            .join(format!("{}.md", bare_id));
+        let _ = crate::export_md::generate_markdown_from_rows(&all_rows, &md_file);
+
         let mut failed_items = Vec::new();
         if !batch_list.is_empty() {
             log::info!("  媒体文件: {} 个（去重后）", batch_list.len());
             failed_items = self.download_media_batch(&batch_list, media_stats).await;
-            storage::save_media_manifest(account_dir, global_seen_urls)
-                .str_err()?;
+            storage::save_media_manifest(account_dir, global_seen_urls).str_err()?;
         }
 
-        let batch_media_ids: HashSet<String> = batch_list.iter().map(|i| i.media_id.clone()).collect();
+        let batch_media_ids: HashSet<String> =
+            batch_list.iter().map(|i| i.media_id.clone()).collect();
         let failed_map: HashMap<String, String> = failed_items
             .iter()
             .map(|i| (i.media_id.clone(), i.error.clone()))
@@ -989,7 +1037,11 @@ fn build_conversation_summary(
     existing_status: &str,
 ) -> Result<Value, String> {
     let rows = storage::read_jsonl_rows(jsonl_file);
-    let rows_ref = if rows.is_empty() { fallback_rows } else { &rows };
+    let rows_ref = if rows.is_empty() {
+        fallback_rows
+    } else {
+        &rows
+    };
 
     let meta_row = rows_ref
         .iter()
@@ -1010,7 +1062,8 @@ fn build_conversation_summary(
     });
     let owned_msg_rows: Vec<Value> = msg_rows.iter().map(|r| (*r).clone()).collect();
     let has_failed_data = storage::rows_has_failed_data(&owned_msg_rows);
-    let (image_count, video_count, _audio_count) = storage::count_media_types_from_rows(&owned_msg_rows);
+    let (image_count, video_count, _audio_count) =
+        storage::count_media_types_from_rows(&owned_msg_rows);
 
     let mut last_text = String::new();
     for r in msg_rows.iter().rev() {

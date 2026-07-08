@@ -1,7 +1,7 @@
 //! Cookie verification binary: reads Chrome cookies, runs Keychain diagnostics,
 //! and optionally tests ListAccounts API.
 use anyhow::Result;
-use gemini_collector_lib::cookies;
+use chat_vault_lib::cookies;
 use std::collections::BTreeMap;
 
 fn main() -> Result<()> {
@@ -20,10 +20,16 @@ fn main() -> Result<()> {
     // ── Phase 0: Keychain diagnostics ──
     eprintln!("\n[cookie-verify] Running Keychain diagnostics...");
     let diag_report = cookies::run_full_diagnostics();
-    eprintln!("[cookie-verify] Diagnostics summary: {}", diag_report.summary);
+    eprintln!(
+        "[cookie-verify] Diagnostics summary: {}",
+        diag_report.summary
+    );
     for kd in &diag_report.keychain_diagnostics {
         if kd.accessible {
-            eprintln!("  [OK] {} — Keychain \"{}\" readable", kd.browser, kd.service);
+            eprintln!(
+                "  [OK] {} — Keychain \"{}\" readable",
+                kd.browser, kd.service
+            );
         } else {
             eprintln!("  [FAIL] {} — {}", kd.browser, kd.detail);
             if !kd.suggestion.is_empty() {

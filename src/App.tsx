@@ -7,7 +7,13 @@ import { TopBar } from "./components/TopBar";
 import { Sidebar } from "./components/Sidebar";
 import { ChatView } from "./components/ChatView";
 import { AccountPicker } from "./components/AccountPicker";
-import { Account, Conversation, ConversationSummary } from "./data/types";
+import { SettingsModal } from "./components/SettingsModal";
+import { LockScreen } from "./components/LockScreen";
+import { NoticeModal } from "./components/modals/NoticeModal";
+import { ClearConfirmModal } from "./components/modals/ClearConfirmModal";
+import { ExportModal } from "./components/modals/ExportModal";
+import { SyncOverlay } from "./components/modals/SyncOverlay";
+import { Account, Conversation, ConversationSummary, AccountExportStats, AccountExportResult } from "./data/types";
 import { ThemeContext, lightTheme, darkTheme } from "./theme";
 
 type Screen = "account-picker" | "chat";
@@ -42,21 +48,9 @@ interface WorkerJobStatePayload {
   error?: WorkerJobError;
 }
 
-interface AccountExportStats {
-  accountId: string;
-  conversationCount: number;
-  conversationFileCount: number;
-  mediaFileCount: number;
-  totalFileCount: number;
-  totalBytes: number;
-  estimatedZipBytes: number;
-}
 
-interface AccountExportResult extends AccountExportStats {
-  zipPath: string;
-  fileName: string;
-  zipSizeBytes: number;
-}
+
+
 
 function isObjectRecord(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === "object" && !Array.isArray(value);
@@ -266,6 +260,9 @@ function parseConversationPayload(json: string): Conversation | null {
 }
 
 function App() {
+  
+  const [isLocked, setIsLocked] = useState(true);
+  const [showSettings, setShowSettings] = useState(false);
   const [screen, setScreen] = useState<Screen>("account-picker");
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [accountsLoading, setAccountsLoading] = useState(true);
@@ -310,6 +307,25 @@ function App() {
   useEffect(() => {
     document.documentElement.classList.toggle("dark", isDark);
   }, [isDark]);
+
+  useEffect(() => {
+    // Check if app is locked with password
+    invoke<boolean>("has_password")
+      .then(hasPwd => {
+        setIsLocked(hasPwd);
+      })
+      .catch(err => {
+        console.error("Failed to check password status:", err);
+        setIsLocked(false);
+      });
+
+    const unlistenSettings = listen("open-settings", () => {
+      setShowSettings(true);
+    });
+    return () => {
+      unlistenSettings.then(f => f());
+    };
+  }, []);
 
   function pruneAutoSyncAttempts(nowMs: number) {
     const map = autoSyncAttemptedAtRef.current;
@@ -978,6 +994,17 @@ function App() {
     }
   }
 
+  async function handleMoveToFolder(convId: string, folderId: string | null) {
+    if (!currentAccount) return;
+    try {
+      await invoke("set_conversation_folder", { accountId: currentAccount.id, conversationId: convId, folderId });
+      // Update local state directly to avoid full reload
+      setConversationSummaries(prev => prev.map(c => c.id === convId ? { ...c, folderId: folderId ?? undefined } : c));
+    } catch (e) {
+      console.error("移动文件夹失败:", e);
+    }
+  }
+
   const anySyncTaskRunning =
     listSyncing || fullSyncing || syncingConversationIds.length > 0 || exportingAccountData || preparingExportData || importingAccountData;
   const visibleConversationSummaries = useMemo(() => {
@@ -987,8 +1014,16 @@ function App() {
   const selectedSummary = selectedId
     ? visibleConversationSummaries.find((c) => c.id === selectedId) ?? null
     : null;
-  const clearDialogBg = theme.isDark ? "#171b22" : "#ffffff";
-  const clearDialogBorder = theme.isDark ? "rgba(255,255,255,0.14)" : "rgba(15,23,42,0.14)";
+  
+  
+
+  if (isLocked) {
+    return (
+      <ThemeContext.Provider value={theme}>
+        <LockScreen onUnlock={() => setIsLocked(false)} />
+      </ThemeContext.Provider>
+    );
+  }
 
   if (screen === "account-picker" || !currentAccount) {
     return (
@@ -1003,6 +1038,9 @@ function App() {
           onReload={handleReloadAccounts}
           reloading={reloadingAccounts}
         />
+        {showSettings && (
+          <SettingsModal onClose={() => setShowSettings(false)} />
+        )}
       </ThemeContext.Provider>
     );
   }
@@ -1064,6 +1102,7 @@ function App() {
           onSyncConversation={handleSyncConversation}
           syncingConversationIds={syncingConversationIds}
           onDeleteConversation={handleDeleteConversation}
+          onMoveToFolder={handleMoveToFolder}
         />
         <div
           style={{
@@ -1073,8 +1112,6 @@ function App() {
             flexDirection: "column",
             overflow: "hidden",
             background: theme.cardBg,
-            backdropFilter: "blur(36px) saturate(112%)",
-            WebkitBackdropFilter: "blur(36px) saturate(112%)",
             position: "relative",
             zIndex: 1,
           }}
@@ -1093,6 +1130,7 @@ function App() {
               setSelectedId(null);
               setScreen("account-picker");
             }}
+            accountId={currentAccount.id}
             authuser={currentAccount.authuser}
             onClearConversation={async () => {
               if (!currentAccount || !selectedId) return;
@@ -1108,282 +1146,45 @@ function App() {
               // 重载 summaries 让侧边栏条数归零
               await loadSummaries(accountId);
             }}
+            onOpenSettings={() => setShowSettings(true)}
           />
-          <ChatView conversation={selectedConversation} accountId={currentAccount?.id} mediaDir={mediaDir} mediaVersion={mediaVersion} scrollToMessageId={scrollToMessageId} onScrolledToMessage={handleScrolledToMessage} />
+          <div id="chat-view-container" style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", overflow: "hidden", position: "relative" }}>
+            <ChatView conversation={selectedConversation} accountId={currentAccount?.id} mediaDir={mediaDir} mediaVersion={mediaVersion} scrollToMessageId={scrollToMessageId} onScrolledToMessage={handleScrolledToMessage} />
+          </div>
         </div>
       </div>
       {showExportModal && exportStats && (
-        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.4)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 }}>
-          <div style={{ width: 460, borderRadius: 14, background: theme.isDark ? "#1c1f25" : "#ffffff", border: `1px solid ${theme.border}`, padding: 22 }}>
-            {/* 标题 */}
-            <div style={{ fontSize: 15, fontWeight: 700, color: theme.text }}>导出账号数据</div>
-            {/* 双列 */}
-            <div style={{ display: "flex", gap: 12, marginTop: 14 }}>
-              {/* 左列：时间范围 */}
-              <div style={{ flex: 1, background: theme.hover, borderRadius: 8, padding: 12 }}>
-                <div style={{ fontSize: 11, fontWeight: 600, color: theme.textMuted, marginBottom: 10, letterSpacing: 0.5 }}>时间范围</div>
-                {([ ["all","全部"], ["3d","3 天"], ["7d","7 天"], ["30d","一个月"] ] as const).map(([val, label]) => (
-                  <div key={val} onClick={() => setExportTimeRange(val)} style={{ display: "flex", alignItems: "center", gap: 10, padding: "4px 0", cursor: "pointer" }}>
-                    <div style={{ width: 10, height: 10, borderRadius: 5, background: exportTimeRange === val ? "#0071e3" : "transparent", border: exportTimeRange === val ? "none" : `1.5px solid ${theme.textMuted}`, flexShrink: 0 }} />
-                    <span style={{ fontSize: 13, color: theme.text }}>{label}</span>
-                  </div>
-                ))}
-              </div>
-              {/* 右列：导出格式 */}
-              <div style={{ flex: 1, background: theme.hover, borderRadius: 8, padding: 12 }}>
-                <div style={{ fontSize: 11, fontWeight: 600, color: theme.textMuted, marginBottom: 10, letterSpacing: 0.5 }}>导出格式</div>
-                {([ ["zip","原始"], ["kelivo","Kelivo"], ["kelivo-split","Kelivo（分包）"] ] as const).map(([val, label]) => (
-                  <div key={val} onClick={() => setExportFormat(val)} style={{ display: "flex", alignItems: "center", gap: 10, padding: "4px 0", cursor: "pointer" }}>
-                    <div style={{ width: 10, height: 10, borderRadius: 5, background: exportFormat === val ? "#0071e3" : "transparent", border: exportFormat === val ? "none" : `1.5px solid ${theme.textMuted}`, flexShrink: 0 }} />
-                    <span style={{ fontSize: 13, color: theme.text }}>{label}</span>
-                  </div>
-                ))}
-              </div>
-            </div>
-            {/* 统计区 */}
-            {(() => {
-              const filteredSummaries = exportTimeRange === "all"
-                ? null
-                : (() => {
-                    const days = exportTimeRange === "3d" ? 3 : exportTimeRange === "7d" ? 7 : 30;
-                    const afterDate = new Date(Date.now() - days * 86400_000).toISOString();
-                    return conversationSummaries.filter(c => c.updatedAt >= afterDate);
-                  })();
-              const displayConvCount = filteredSummaries ? filteredSummaries.length : exportStats.conversationCount;
-              const displayMediaCount = filteredSummaries
-                ? filteredSummaries.reduce((sum, c) => sum + (c.imageCount ?? 0) + (c.videoCount ?? 0), 0)
-                : exportStats.mediaFileCount;
-              const cachedBytes = exportRangeBytesCache.get(exportTimeRange);
-              const bytesText = cachedBytes !== undefined
-                ? formatBytes(cachedBytes)
-                : exportRangeBytesLoading ? "加载中…" : "—";
-              return (
-                <div style={{ marginTop: 12, padding: "10px 12px", background: theme.hover, borderRadius: 8, fontSize: 12, color: theme.textSub, lineHeight: 1.8 }}>
-                  <div>对话数: <span style={{ color: theme.text, fontWeight: 500 }}>{displayConvCount}</span></div>
-                  <div>媒体文件（估算）: <span style={{ color: theme.text, fontWeight: 500 }}>{displayMediaCount}</span></div>
-                  {filteredSummaries === null && (
-                    <>
-                      <div>文件总数: <span style={{ color: theme.text, fontWeight: 500 }}>{exportStats.totalFileCount}</span></div>
-                      <div>预估压缩后: <span style={{ color: theme.text, fontWeight: 500 }}>{formatBytes(exportStats.estimatedZipBytes)}</span></div>
-                    </>
-                  )}
-                  <div>媒体体积: <span style={{ color: theme.text, fontWeight: 500 }}>{bytesText}</span></div>
-                </div>
-              );
-            })()}
-            {/* 按钮行 */}
-            <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 14 }}>
-              <button onClick={() => { setShowExportModal(false); setExportStats(null); setExportRangeBytesCache(new Map()); }} style={{ padding: "7px 16px", borderRadius: 8, border: "none", background: theme.btnHoverBg, color: theme.text, fontSize: 13, cursor: "pointer" }}>取消</button>
-              <button onClick={() => { void confirmExport(); }} disabled={exportingAccountData} style={{ padding: "7px 16px", borderRadius: 8, border: "none", background: "#0071e3", color: "#fff", fontSize: 13, fontWeight: 600, cursor: exportingAccountData ? "default" : "pointer", opacity: exportingAccountData ? 0.6 : 1 }}>开始导出</button>
-            </div>
-          </div>
-        </div>
+        <ExportModal
+          exportStats={exportStats}
+          exportTimeRange={exportTimeRange}
+          setExportTimeRange={setExportTimeRange}
+          exportFormat={exportFormat}
+          setExportFormat={setExportFormat}
+          conversationSummaries={conversationSummaries}
+          exportRangeBytesCache={exportRangeBytesCache}
+          exportRangeBytesLoading={exportRangeBytesLoading}
+          exportingAccountData={exportingAccountData}
+          onCancel={() => { setShowExportModal(false); setExportStats(null); setExportRangeBytesCache(new Map()); }}
+          onConfirm={() => { void confirmExport(); }}
+        />
       )}
       {importNotice && (
-        <div
-          style={{
-            position: "fixed",
-            inset: 0,
-            zIndex: 10001,
-            background: "rgba(0,0,0,0.32)",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-          }}
-        >
-          <div
-            style={{
-              width: 430,
-              maxWidth: "calc(100vw - 32px)",
-              borderRadius: 12,
-              background: clearDialogBg,
-              border: `1px solid ${clearDialogBorder}`,
-              boxShadow: theme.isDark ? "0 18px 40px rgba(0,0,0,0.45)" : "0 18px 40px rgba(0,0,0,0.2)",
-              padding: 16,
-            }}
-          >
-            <div style={{ fontSize: 15, fontWeight: 700, color: theme.text, marginBottom: 8 }}>
-              {importNotice.title}
-            </div>
-            <div style={{ fontSize: 12, color: theme.textSub, lineHeight: 1.6, marginBottom: 14 }}>
-              {importNotice.lines.map((line, idx) => (
-                <div key={`${idx}_${line}`}>{line}</div>
-              ))}
-            </div>
-            <div style={{ display: "flex", justifyContent: "flex-end" }}>
-              <button
-                onClick={() => setImportNotice(null)}
-                style={{
-                  border: "none",
-                  background: "#0071e3",
-                  color: "#fff",
-                  borderRadius: 8,
-                  padding: "7px 12px",
-                  fontSize: 12,
-                  fontWeight: 600,
-                  cursor: "pointer",
-                }}
-              >
-                知道了
-              </button>
-            </div>
-          </div>
-        </div>
+        <NoticeModal title={importNotice.title} lines={importNotice.lines} onClose={() => setImportNotice(null)} />
       )}
       {exportNotice && (
-        <div
-          style={{
-            position: "fixed",
-            inset: 0,
-            zIndex: 10001,
-            background: "rgba(0,0,0,0.32)",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-          }}
-        >
-          <div
-            style={{
-              width: 430,
-              maxWidth: "calc(100vw - 32px)",
-              borderRadius: 12,
-              background: clearDialogBg,
-              border: `1px solid ${clearDialogBorder}`,
-              boxShadow: theme.isDark ? "0 18px 40px rgba(0,0,0,0.45)" : "0 18px 40px rgba(0,0,0,0.2)",
-              padding: 16,
-            }}
-          >
-            <div style={{ fontSize: 15, fontWeight: 700, color: theme.text, marginBottom: 8 }}>
-              {exportNotice.title}
-            </div>
-            <div style={{ fontSize: 12, color: theme.textSub, lineHeight: 1.6, marginBottom: 14 }}>
-              {exportNotice.lines.map((line, idx) => (
-                <div key={`${idx}_${line}`}>{line}</div>
-              ))}
-            </div>
-            <div style={{ display: "flex", justifyContent: "flex-end" }}>
-              <button
-                onClick={() => setExportNotice(null)}
-                style={{
-                  border: "none",
-                  background: "#0071e3",
-                  color: "#fff",
-                  borderRadius: 8,
-                  padding: "7px 12px",
-                  fontSize: 12,
-                  fontWeight: 600,
-                  cursor: "pointer",
-                }}
-              >
-                知道了
-              </button>
-            </div>
-          </div>
-        </div>
+        <NoticeModal title={exportNotice.title} lines={exportNotice.lines} onClose={() => setExportNotice(null)} />
       )}
-      {showClearConfirm && (
-        <div
-          style={{
-            position: "fixed",
-            inset: 0,
-            zIndex: 9999,
-            background: "rgba(0,0,0,0.32)",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-          }}
-        >
-          <div
-            style={{
-              width: 380,
-              maxWidth: "calc(100vw - 32px)",
-              borderRadius: 12,
-              background: clearDialogBg,
-              border: `1px solid ${clearDialogBorder}`,
-              boxShadow: theme.isDark ? "0 18px 40px rgba(0,0,0,0.45)" : "0 18px 40px rgba(0,0,0,0.2)",
-              padding: 16,
-            }}
-          >
-            <div style={{ fontSize: 15, fontWeight: 700, color: theme.text, marginBottom: 8 }}>
-              确认清空本地数据？
-            </div>
-            <div style={{ fontSize: 13, color: theme.textSub, lineHeight: 1.5, marginBottom: 14 }}>
-              账号「{currentAccount.name || currentAccount.email || currentAccount.id}」的会话与媒体缓存将被删除，且不可恢复。
-            </div>
-            <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
-              <button
-                onClick={() => setShowClearConfirm(false)}
-                style={{
-                  border: `1px solid ${clearDialogBorder}`,
-                  background: "transparent",
-                  color: theme.text,
-                  borderRadius: 8,
-                  padding: "7px 12px",
-                  fontSize: 12,
-                  cursor: "pointer",
-                }}
-              >
-                取消
-              </button>
-              <button
-                onClick={() => void confirmClearAccountData()}
-                style={{
-                  border: "none",
-                  background: "#d34b4b",
-                  color: "#fff",
-                  borderRadius: 8,
-                  padding: "7px 12px",
-                  fontSize: 12,
-                  fontWeight: 600,
-                  cursor: "pointer",
-                }}
-              >
-                确认清空
-              </button>
-            </div>
-          </div>
-        </div>
+      {showClearConfirm && currentAccount && (
+        <ClearConfirmModal accountName={currentAccount.name || currentAccount.email || currentAccount.id} onCancel={() => setShowClearConfirm(false)} onConfirm={() => void confirmClearAccountData()} />
       )}
       {(exportingAccountData || preparingExportData || importingAccountData) && (
-        <>
-          <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
-          <div
-            style={{
-              position: "fixed",
-              inset: 0,
-              zIndex: 2000,
-              background: "rgba(0,0,0,0.45)",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-            }}
-          >
-            <div
-              style={{
-                borderRadius: 14,
-                padding: "28px 36px",
-                background: theme.isDark ? "#1c1f25" : "#fff",
-                display: "flex",
-                flexDirection: "column",
-                alignItems: "center",
-              }}
-            >
-              <div
-                style={{
-                  width: 32,
-                  height: 32,
-                  border: "3px solid rgba(0,113,227,0.2)",
-                  borderTop: "3px solid #0071e3",
-                  borderRadius: "50%",
-                  animation: "spin 0.8s linear infinite",
-                }}
-              />
-              <div style={{ marginTop: 14, fontSize: 14, color: theme.text }}>
-                {importingAccountData ? "导入中，请勿关闭…" : preparingExportData ? "正在读取数据…" : "导出中，请勿关闭…"}
-              </div>
-            </div>
-          </div>
-        </>
+        <SyncOverlay importingAccountData={importingAccountData} preparingExportData={preparingExportData} />
+      )}
+      {showSettings && (
+        <SettingsModal 
+          onClose={() => setShowSettings(false)} 
+          accountId={currentAccount?.id}
+        />
       )}
     </ThemeContext.Provider>
   );

@@ -58,9 +58,7 @@ struct AccountExportStats {
 fn sanitize_file_component(raw: &str) -> String {
     let mut out = String::with_capacity(raw.len());
     for ch in raw.chars() {
-        if ch.is_control()
-            || matches!(ch, '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|')
-        {
+        if ch.is_control() || matches!(ch, '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|') {
             out.push('_');
             continue;
         }
@@ -136,7 +134,10 @@ fn account_export_user_label(account_dir: &Path, account_id: &str) -> String {
     account_id.to_string()
 }
 
-fn build_account_export_stats(account_dir: &Path, account_id: &str) -> Result<AccountExportStats, String> {
+fn build_account_export_stats(
+    account_dir: &Path,
+    account_id: &str,
+) -> Result<AccountExportStats, String> {
     let conversations_dir = account_dir.join("conversations");
     let media_dir = account_dir.join("media");
 
@@ -169,22 +170,45 @@ fn build_account_export_stats(account_dir: &Path, account_id: &str) -> Result<Ac
 /// 已压缩的媒体扩展名，使用 Stored 避免无效 Deflate
 fn should_store(path: &Path) -> bool {
     matches!(
-        path.extension().and_then(|e| e.to_str()).map(|e| e.to_ascii_lowercase()).as_deref(),
-        Some("jpg" | "jpeg" | "png" | "gif" | "webp" | "avif" | "heic" | "heif"
-            | "mp4" | "webm" | "mov" | "avi" | "mkv"
-            | "mp3" | "aac" | "ogg" | "opus" | "flac"
-            | "zip" | "gz" | "zst" | "br" | "xz" | "bz2")
+        path.extension()
+            .and_then(|e| e.to_str())
+            .map(|e| e.to_ascii_lowercase())
+            .as_deref(),
+        Some(
+            "jpg"
+                | "jpeg"
+                | "png"
+                | "gif"
+                | "webp"
+                | "avif"
+                | "heic"
+                | "heif"
+                | "mp4"
+                | "webm"
+                | "mov"
+                | "avi"
+                | "mkv"
+                | "mp3"
+                | "aac"
+                | "ogg"
+                | "opus"
+                | "flac"
+                | "zip"
+                | "gz"
+                | "zst"
+                | "br"
+                | "xz"
+                | "bz2"
+        )
     )
 }
 
 fn zip_opts_deflate() -> zip::write::SimpleFileOptions {
-    zip::write::SimpleFileOptions::default()
-        .compression_method(zip::CompressionMethod::Deflated)
+    zip::write::SimpleFileOptions::default().compression_method(zip::CompressionMethod::Deflated)
 }
 
 fn zip_opts_stored() -> zip::write::SimpleFileOptions {
-    zip::write::SimpleFileOptions::default()
-        .compression_method(zip::CompressionMethod::Stored)
+    zip::write::SimpleFileOptions::default().compression_method(zip::CompressionMethod::Stored)
 }
 
 fn zip_account_dir(account_dir: &Path, zip_path: &Path) -> Result<(), String> {
@@ -193,37 +217,42 @@ fn zip_account_dir(account_dir: &Path, zip_path: &Path) -> Result<(), String> {
         .and_then(|n| n.to_str())
         .ok_or_else(|| "账号目录名称异常".to_string())?;
 
-    let file = std::fs::File::create(zip_path)
-        .map_err(|e| format!("创建 zip 文件失败: {}", e))?;
+    let file = std::fs::File::create(zip_path).map_err(|e| format!("创建 zip 文件失败: {}", e))?;
     let mut zip_writer = zip::ZipWriter::new(file);
     let opts_deflate = zip_opts_deflate();
     let opts_stored = zip_opts_stored();
 
     // 递归收集所有文件
     let mut entries: Vec<std::path::PathBuf> = Vec::new();
-    collect_files(account_dir, &mut entries)
-        .map_err(|e| format!("遍历目录失败: {}", e))?;
+    collect_files(account_dir, &mut entries).map_err(|e| format!("遍历目录失败: {}", e))?;
 
     for entry_path in &entries {
         let rel = entry_path
             .strip_prefix(account_dir)
             .map_err(|e| format!("路径计算失败: {}", e))?;
         // zip 内路径以 folder_name/ 为前缀
-        let zip_entry_name = format!("{}/{}", folder_name, rel.to_string_lossy().replace('\\', "/"));
+        let zip_entry_name = format!(
+            "{}/{}",
+            folder_name,
+            rel.to_string_lossy().replace('\\', "/")
+        );
 
         if entry_path.is_dir() {
             zip_writer
                 .add_directory(&zip_entry_name, opts_stored)
                 .map_err(|e| format!("添加目录失败: {}", e))?;
         } else {
-            let opts = if should_store(entry_path) { opts_stored } else { opts_deflate };
+            let opts = if should_store(entry_path) {
+                opts_stored
+            } else {
+                opts_deflate
+            };
             zip_writer
                 .start_file(&zip_entry_name, opts)
                 .map_err(|e| format!("添加文件失败: {}", e))?;
-            let mut f = std::fs::File::open(entry_path)
-                .map_err(|e| format!("打开文件失败: {}", e))?;
-            std::io::copy(&mut f, &mut zip_writer)
-                .map_err(|e| format!("写入 zip 失败: {}", e))?;
+            let mut f =
+                std::fs::File::open(entry_path).map_err(|e| format!("打开文件失败: {}", e))?;
+            std::io::copy(&mut f, &mut zip_writer).map_err(|e| format!("写入 zip 失败: {}", e))?;
         }
     }
 
@@ -300,7 +329,9 @@ pub fn get_account_range_bytes(
 
         for line in raw.lines() {
             let s = line.trim();
-            if s.is_empty() { continue; }
+            if s.is_empty() {
+                continue;
+            }
             let obj: serde_json::Value = match serde_json::from_str(s) {
                 Ok(v) => v,
                 Err(_) => continue,
@@ -308,7 +339,10 @@ pub fn get_account_range_bytes(
             match obj.get("type").and_then(|v| v.as_str()) {
                 Some("meta") => {
                     if updated_at.is_none() {
-                        updated_at = obj.get("updatedAt").and_then(|v| v.as_str()).map(|s| s.to_string());
+                        updated_at = obj
+                            .get("updatedAt")
+                            .and_then(|v| v.as_str())
+                            .map(|s| s.to_string());
                     }
                 }
                 Some("message") => {
@@ -406,9 +440,7 @@ pub fn export_account_zip(
     }
 
     zip_account_dir(&account_dir, &zip_path)?;
-    let zip_size_bytes = std::fs::metadata(&zip_path)
-        .str_err()?
-        .len();
+    let zip_size_bytes = std::fs::metadata(&zip_path).str_err()?.len();
 
     let result = serde_json::json!({
         "accountId": account_id,
@@ -447,14 +479,23 @@ fn to_cst_value(v: &serde_json::Value) -> serde_json::Value {
 
 fn parse_size(s: &str) -> Result<u64, String> {
     let upper = s.trim().to_uppercase();
-    for (suffix, mult) in &[("GB", 1u64 << 30), ("MB", 1u64 << 20), ("KB", 1u64 << 10), ("B", 1u64)] {
+    for (suffix, mult) in &[
+        ("GB", 1u64 << 30),
+        ("MB", 1u64 << 20),
+        ("KB", 1u64 << 10),
+        ("B", 1u64),
+    ] {
         if upper.ends_with(suffix) {
             let num_str = upper[..upper.len() - suffix.len()].trim();
-            let val: f64 = num_str.parse().map_err(|_| format!("无法解析大小: {}", s))?;
+            let val: f64 = num_str
+                .parse()
+                .map_err(|_| format!("无法解析大小: {}", s))?;
             return Ok((val * (*mult as f64)).round() as u64);
         }
     }
-    s.trim().parse::<u64>().map_err(|_| format!("无法解析大小: {}", s))
+    s.trim()
+        .parse::<u64>()
+        .map_err(|_| format!("无法解析大小: {}", s))
 }
 
 fn idx_to_label(mut n: usize) -> String {
@@ -475,11 +516,18 @@ fn build_kelivo_content(text: &str, attachments: &[serde_json::Value]) -> String
         if media_id.is_empty() {
             continue;
         }
-        let mime = att.get("mimeType").and_then(|v| v.as_str()).unwrap_or("application/octet-stream");
+        let mime = att
+            .get("mimeType")
+            .and_then(|v| v.as_str())
+            .unwrap_or("application/octet-stream");
         if mime.starts_with("image/") {
             parts.push(format!("[image:/upload/{}]", media_id));
         } else {
-            parts.push(format!("[file:/upload/{mid}|{mid}|{mime}]", mid = media_id, mime = mime));
+            parts.push(format!(
+                "[file:/upload/{mid}|{mid}|{mime}]",
+                mid = media_id,
+                mime = mime
+            ));
         }
     }
     parts.join("\n")
@@ -495,7 +543,11 @@ struct KelivoItem {
     media_bytes: u64,
 }
 
-fn parse_kelivo_jsonl(path: &Path, media_dir: &Path, after_date: Option<&str>) -> Result<Option<KelivoItem>, String> {
+fn parse_kelivo_jsonl(
+    path: &Path,
+    media_dir: &Path,
+    after_date: Option<&str>,
+) -> Result<Option<KelivoItem>, String> {
     let raw = std::fs::read_to_string(path).str_err()?;
     let mut meta: Option<serde_json::Value> = None;
     let mut messages: Vec<serde_json::Value> = Vec::new();
@@ -529,27 +581,60 @@ fn parse_kelivo_jsonl(path: &Path, media_dir: &Path, after_date: Option<&str>) -
         }
     }
 
-    let conv_id = meta.get("id").and_then(|v| v.as_str()).unwrap_or("").to_string();
-    let title = meta.get("title").and_then(|v| v.as_str()).unwrap_or("").to_string();
-    let created_at = to_cst_value(&meta.get("createdAt").cloned().unwrap_or(serde_json::Value::Null));
-    let updated_at = to_cst_value(&meta.get("updatedAt").cloned().unwrap_or(serde_json::Value::Null));
+    let conv_id = meta
+        .get("id")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+    let title = meta
+        .get("title")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+    let created_at = to_cst_value(
+        &meta
+            .get("createdAt")
+            .cloned()
+            .unwrap_or(serde_json::Value::Null),
+    );
+    let updated_at = to_cst_value(
+        &meta
+            .get("updatedAt")
+            .cloned()
+            .unwrap_or(serde_json::Value::Null),
+    );
 
     let mut kelivo_msgs: Vec<serde_json::Value> = Vec::new();
     let mut message_ids: Vec<serde_json::Value> = Vec::new();
     let mut media_ids_set: std::collections::HashSet<String> = std::collections::HashSet::new();
 
     for msg in &messages {
-        if msg.get("hidden").and_then(|v| v.as_bool()).unwrap_or(false) { continue; }
+        if msg.get("hidden").and_then(|v| v.as_bool()).unwrap_or(false) {
+            continue;
+        }
         let text = msg.get("text").and_then(|v| v.as_str()).unwrap_or("");
-        let msg_id = msg.get("id").and_then(|v| v.as_str()).unwrap_or("").to_string();
+        let msg_id = msg
+            .get("id")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
         let role_raw = msg.get("role").and_then(|v| v.as_str()).unwrap_or("user");
-        let role = if role_raw == "model" { "assistant" } else { "user" };
-        let attachments = msg.get("attachments")
+        let role = if role_raw == "model" {
+            "assistant"
+        } else {
+            "user"
+        };
+        let attachments = msg
+            .get("attachments")
             .and_then(|v| v.as_array())
             .map(|a| a.as_slice())
             .unwrap_or(&[]);
         let content = build_kelivo_content(text, attachments);
-        let timestamp = to_cst_value(&msg.get("timestamp").cloned().unwrap_or(serde_json::Value::Null));
+        let timestamp = to_cst_value(
+            &msg.get("timestamp")
+                .cloned()
+                .unwrap_or(serde_json::Value::Null),
+        );
 
         for att in attachments {
             if let Some(mid) = att.get("mediaId").and_then(|v| v.as_str()) {
@@ -595,15 +680,19 @@ fn parse_kelivo_jsonl(path: &Path, media_dir: &Path, after_date: Option<&str>) -
         "lastSummarizedMessageCount": 0,
     });
 
-    let conv_bytes = serde_json::to_string(&kelivo_conv).unwrap_or_default().len() as u64;
-    let msgs_bytes: u64 = kelivo_msgs.iter()
+    let conv_bytes = serde_json::to_string(&kelivo_conv)
+        .unwrap_or_default()
+        .len() as u64;
+    let msgs_bytes: u64 = kelivo_msgs
+        .iter()
         .map(|m| serde_json::to_string(m).unwrap_or_default().len() as u64)
         .sum();
     let json_bytes = conv_bytes + msgs_bytes;
 
     let media_ids: Vec<String> = media_ids_set.into_iter().collect();
 
-    let media_bytes: u64 = media_ids.iter()
+    let media_bytes: u64 = media_ids
+        .iter()
         .filter_map(|mid| {
             let p = media_dir.join(mid);
             p.metadata().ok().map(|m| m.len())
@@ -620,16 +709,28 @@ fn parse_kelivo_jsonl(path: &Path, media_dir: &Path, after_date: Option<&str>) -
     }))
 }
 
-fn pack_bins(items: Vec<KelivoItem>, json_limit: Option<u64>, media_limit: Option<u64>) -> Vec<Vec<KelivoItem>> {
+fn pack_bins(
+    items: Vec<KelivoItem>,
+    json_limit: Option<u64>,
+    media_limit: Option<u64>,
+) -> Vec<Vec<KelivoItem>> {
     if json_limit.is_none() && media_limit.is_none() {
         return vec![items];
     }
 
-    let mut indexed: Vec<(usize, f64)> = items.iter().enumerate().map(|(i, item)| {
-        let jn = json_limit.map(|lim| item.json_bytes as f64 / lim as f64).unwrap_or(0.0);
-        let mn = media_limit.map(|lim| item.media_bytes as f64 / lim as f64).unwrap_or(0.0);
-        (i, jn.max(mn))
-    }).collect();
+    let mut indexed: Vec<(usize, f64)> = items
+        .iter()
+        .enumerate()
+        .map(|(i, item)| {
+            let jn = json_limit
+                .map(|lim| item.json_bytes as f64 / lim as f64)
+                .unwrap_or(0.0);
+            let mn = media_limit
+                .map(|lim| item.media_bytes as f64 / lim as f64)
+                .unwrap_or(0.0);
+            (i, jn.max(mn))
+        })
+        .collect();
     indexed.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
 
     struct Bin {
@@ -647,14 +748,22 @@ fn pack_bins(items: Vec<KelivoItem>, json_limit: Option<u64>, media_limit: Optio
             || media_limit.map(|lim| mb > lim).unwrap_or(false);
 
         if exceeds {
-            bins.push(Bin { json_used: jb, media_used: mb, indices: vec![idx] });
+            bins.push(Bin {
+                json_used: jb,
+                media_used: mb,
+                indices: vec![idx],
+            });
             continue;
         }
 
         let mut placed = false;
         for bin in &mut bins {
-            let json_ok = json_limit.map(|lim| bin.json_used + jb <= lim).unwrap_or(true);
-            let media_ok = media_limit.map(|lim| bin.media_used + mb <= lim).unwrap_or(true);
+            let json_ok = json_limit
+                .map(|lim| bin.json_used + jb <= lim)
+                .unwrap_or(true);
+            let media_ok = media_limit
+                .map(|lim| bin.media_used + mb <= lim)
+                .unwrap_or(true);
             if json_ok && media_ok {
                 bin.indices.push(idx);
                 bin.json_used += jb;
@@ -665,20 +774,39 @@ fn pack_bins(items: Vec<KelivoItem>, json_limit: Option<u64>, media_limit: Optio
         }
 
         if !placed {
-            bins.push(Bin { json_used: jb, media_used: mb, indices: vec![idx] });
+            bins.push(Bin {
+                json_used: jb,
+                media_used: mb,
+                indices: vec![idx],
+            });
         }
     }
 
     let mut items_opt: Vec<Option<KelivoItem>> = items.into_iter().map(Some).collect();
-    bins.into_iter().map(|bin| {
-        bin.indices.into_iter().map(|i| items_opt[i].take().unwrap()).collect()
-    }).collect()
+    bins.into_iter()
+        .map(|bin| {
+            bin.indices
+                .into_iter()
+                .map(|i| items_opt[i].take().unwrap())
+                .collect()
+        })
+        .collect()
 }
 
-fn write_kelivo_zip(zip_path: &Path, bin_items: &[KelivoItem], media_dir: &Path) -> Result<(usize, usize, usize, usize), String> {
+fn write_kelivo_zip(
+    zip_path: &Path,
+    bin_items: &[KelivoItem],
+    media_dir: &Path,
+) -> Result<(usize, usize, usize, usize), String> {
     let all_convs: Vec<&serde_json::Value> = bin_items.iter().map(|it| &it.kelivo_conv).collect();
-    let all_msgs: Vec<&serde_json::Value> = bin_items.iter().flat_map(|it| it.kelivo_msgs.iter()).collect();
-    let mut all_mids: Vec<&str> = bin_items.iter().flat_map(|it| it.media_ids.iter().map(|s| s.as_str())).collect();
+    let all_msgs: Vec<&serde_json::Value> = bin_items
+        .iter()
+        .flat_map(|it| it.kelivo_msgs.iter())
+        .collect();
+    let mut all_mids: Vec<&str> = bin_items
+        .iter()
+        .flat_map(|it| it.media_ids.iter().map(|s| s.as_str()))
+        .collect();
     all_mids.sort_unstable();
     all_mids.dedup();
 
@@ -708,7 +836,11 @@ fn write_kelivo_zip(zip_path: &Path, bin_items: &[KelivoItem], media_dir: &Path)
     for mid in &all_mids {
         let src = media_dir.join(mid);
         if src.exists() {
-            let opts = if should_store(&src) { opts_stored } else { opts_deflate };
+            let opts = if should_store(&src) {
+                opts_stored
+            } else {
+                opts_deflate
+            };
             zw.start_file(format!("upload/{}", mid), opts).str_err()?;
             let mut f = std::fs::File::open(&src).str_err()?;
             std::io::copy(&mut f, &mut zw).str_err()?;
@@ -764,11 +896,13 @@ fn kelivo_export_impl(
     let bins = pack_bins(items, json_limit, media_limit);
     let multi = bins.len() > 1;
 
-    let stem = output_path.file_stem()
+    let stem = output_path
+        .file_stem()
         .and_then(|s| s.to_str())
         .unwrap_or("kelivo_backup")
         .to_string();
-    let suffix = output_path.extension()
+    let suffix = output_path
+        .extension()
         .and_then(|s| s.to_str())
         .unwrap_or("zip")
         .to_string();
@@ -779,8 +913,16 @@ fn kelivo_export_impl(
     for (idx, bin_items) in bins.iter().enumerate() {
         let zip_path = if multi {
             let label = idx_to_label(idx);
-            output_dir.join(format!("{}_{}{}",label, stem,
-                if suffix.is_empty() { String::new() } else { format!(".{}", suffix) }))
+            output_dir.join(format!(
+                "{}_{}{}",
+                label,
+                stem,
+                if suffix.is_empty() {
+                    String::new()
+                } else {
+                    format!(".{}", suffix)
+                }
+            ))
         } else {
             output_path.to_path_buf()
         };
@@ -792,7 +934,11 @@ fn kelivo_export_impl(
             .map(|m| m.len() as f64 / 1024.0 / 1024.0)
             .unwrap_or(0.0);
 
-        let label_prefix = if multi { format!("[{}] ", idx_to_label(idx)) } else { String::new() };
+        let label_prefix = if multi {
+            format!("[{}] ", idx_to_label(idx))
+        } else {
+            String::new()
+        };
         result_lines.push(format!(
             "  {}{}  {} 对话  {} 消息  媒体 {}✓/{}✗  {:.1}MB",
             label_prefix,
@@ -808,7 +954,9 @@ fn kelivo_export_impl(
     let summary = if multi {
         format!(
             "[信息] 成功转换: {} 对话，{} 条消息，跳过 {}\n{}\n[完成] 共 {} 个包，输出到 {}",
-            total_convs, total_msgs, skipped,
+            total_convs,
+            total_msgs,
+            skipped,
             result_lines.join("\n"),
             bins.len(),
             output_dir.display(),
@@ -820,7 +968,9 @@ fn kelivo_export_impl(
             .unwrap_or(0.0);
         format!(
             "[信息] 成功转换: {} 对话，{} 条消息，跳过 {}\n{}\n[完成] 输出: {}  ({:.1} MB)",
-            total_convs, total_msgs, skipped,
+            total_convs,
+            total_msgs,
+            skipped,
             result_lines.join("\n"),
             zip_path.display(),
             size_mb,

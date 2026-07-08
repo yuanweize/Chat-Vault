@@ -1,120 +1,99 @@
 <div align="center">
 
-<img src="src-tauri/icons/128x128.png" width="120" style="border-radius:20px"/>
+<img src="src-tauri/icons/128x128.png" width="120" style="border-radius:22px; box-shadow: 0 8px 24px rgba(0,0,0,0.15); margin-bottom: 20px"/>
 
-# Gemini Collector
+# Chat Vault
 
-**Back up all your Google Gemini conversations & AI-generated media locally**
+**Your Ultimate Google Gemini Local Backup & Management Vault**
 
-Native desktop app for macOS & Windows · Multi-account · Light / Dark theme
+Native Desktop App for macOS & Windows · Unattended Background Sync · Password Protection · Timeline & Multi-format Export
 
 [**简体中文**](./README.zh-CN.md)
 
-![GitHub Release](https://img.shields.io/github/v/release/FirenzeLor/gemini-collector?color=blue)
-
-![Last Commit](https://img.shields.io/github/last-commit/FirenzeLor/gemini-collector) ![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)
+![GitHub Release](https://img.shields.io/github/v/release/yuanweize/Chat-Vault?color=0071e3&style=for-the-badge)
+![Platform](https://img.shields.io/badge/Platform-macOS%20%7C%20Windows-lightgrey?style=for-the-badge)
+![License](https://img.shields.io/badge/License-AGPL%203.0-green?style=for-the-badge)
 
 </div>
 
 ---
 
-## Screenshots
+## 📸 Screenshots
+
+> **✨ What's New in v3.0.0**: We have completely overhauled the UI with a new Flat Minimalist design, stripping away heavy glassmorphism for a clean, snappy aesthetic. The core parsing engine has also been refactored to perfectly handle massive Deep Research and Canvas generation payloads without UI freezing.
 
 <div align="center">
 
 | Light theme | Dark theme |
 |:---:|:---:|
-| <img src=".github/images/account-picker-light.png" width="420" alt="Google Gemini multi-account picker desktop app light theme" title="Light theme" /> | <img src=".github/images/account-picker-dark.png" width="420" alt="Google Gemini multi-account picker desktop app dark theme" title="Dark theme" /> |
+| <img src=".github/images/account-picker-light.png" width="420" alt="Account picker light theme" title="Light theme" /> | <img src=".github/images/account-picker-dark.png" width="420" alt="Account picker dark theme" title="Dark theme" /> |
 
 | Chat view | Media messages |
 |:---:|:---:|
-| <img src=".github/images/chat-main.png" width="420" alt="Google Gemini local chat history viewer and backup desktop interface" title="Chat view" /> | <img src=".github/images/chat-media.png" width="420" alt="Downloading and viewing Gemini AI-generated images and media messages locally" title="Media messages" /> |
+| <img src=".github/images/chat-main.png" width="420" alt="Chat view" title="Chat view" /> | <img src=".github/images/chat-media.png" width="420" alt="Media messages" title="Media messages" /> |
 
 | Conversation list | Export |
 |:---:|:---:|
-| <img src=".github/images/chat-conversation.png" width="420" alt="Google Gemini conversation list sync and local backup management" title="Conversation list" /> | <img src=".github/images/export-dialog.png" width="420" alt="Exporting Google Gemini conversations to local Markdown and JSON formats" title="Export" /> |
-
-| Deep Research | Canvas files |
-|:---:|:---:|
-| <img src=".github/images/deep-research-chat.png" width="420" alt="Google Gemini Deep Research conversation with rounds and sources summary" title="Deep Research" /> | <img src=".github/images/canvas-chat.png" width="420" alt="Multiple AI-generated HTML canvas files displayed inline in chat" title="Canvas files" /> |
-
-| Research progress | Research report |
-|:---:|:---:|
-| <img src=".github/images/deep-research-progress.png" width="420" alt="Deep Research progress timeline with rounds, thinking steps, and web sources" title="Research progress" /> | <img src=".github/images/deep-research-report.png" width="420" alt="Deep Research full report viewer with table of contents" title="Research report" /> |
+| <img src=".github/images/chat-conversation.png" width="420" alt="Conversation list" title="Conversation list" /> | <img src=".github/images/export-dialog.png" width="420" alt="Export dialog" title="Export" /> |
 
 </div>
 
 ---
 
-## Features
+## ✨ Features (Chat-Vault Exclusive)
 
-**Zero-config sync**
-- **macOS**: automatically detects all Gemini accounts signed in to Chrome — one-click sync, no setup needed
-- **Windows**: sign in via the built-in browser on first launch, then sync automatically
-- Multi-account support with independent management, incremental updates, and resumable transfers
+We took the brilliant foundation of `gemini-collector` and upgraded it into a full-fledged, unattended **Vault** for your AI data:
 
-**Full content archival**
-- Sync all conversation text with complete context
-- Download user-uploaded attachments
-- Save AI-generated images, music, videos, reports, and more — nothing is left behind
+- 🛡️ **Vault Security**: Set a password lock with auto-lock timers (1m, 5m, 15m, etc.) to keep your local AI chats private.
+- 🥷 **Unattended Background Sync**: Run silently in the macOS Menu Bar/Windows Tray without cluttering your Dock. Configure auto-sync intervals directly in the UI.
+- 📦 **Advanced Multi-Format Export**:
+  - Export beautiful native **PDFs** optimized for reading and printing.
+  - Export rich **Markdown** files with local media embedding.
+  - Export **ZIP archives** containing full conversation metadata and assets.
+- 📅 **Voyager-Style Timeline**: Seamlessly browse thousands of conversations neatly grouped by month (e.g., "This Month", "June 2026", "Earlier").
+- 🌐 **Modern i18n System**: Full dynamic support for English and Simplified Chinese interfaces.
+- ⚡ **Worry-Free Sync Engine**: Exponential backoff and auto-retries for media downloads, guaranteeing zero data loss during network fluctuations.
 
-**Reading experience**
-- Native UI with automatic light / dark theme switching
-- Full rendering: Markdown, syntax-highlighted code, LaTeX math
-- Timeline navigation for instant access to thousands of conversations
-- Right-click to delete individual conversations
-
-**Export**
-- Filter by time range (all / last 3 days / 7 days / 1 month)
-- Export formats:
-  - Raw data
-  - [Kelivo](https://github.com/Chevey339/kelivo)
-  - [Kelivo](https://github.com/Chevey339/kelivo) split packages (for iOS devices with limited single-import size)
-- Preview file count and size before exporting
+### Core Capabilities
+- **Zero-config sync**: Automatically detects Chrome sessions on macOS. Sign-in via WebView on Windows.
+- **Full content archival**: Syncs text, user-uploaded attachments, AI-generated images, canvas files, and Deep Research reports.
+- **Reading experience**: Native UI with automatic light/dark theme switching, LaTeX math rendering, and syntax-highlighted code.
 
 ---
 
-## Security & Privacy
+## 🔒 Security & Privacy
 
 **Everything runs locally. No data is ever uploaded.**
 
-- **macOS**: reads local Chrome cookies for Gemini authorization — no manual login required
-- **Windows**: Google sign-in via built-in WebView2 browser, cookies stored locally only
-- All synced content stays on your machine — no third-party servers involved
-- No account registration or extra authorization needed
+- **macOS**: reads local Chrome cookies for Gemini authorization — no manual login required.
+- **Windows**: Google sign-in via built-in WebView2 browser, cookies stored locally only.
+- All synced content stays on your machine — no third-party servers involved.
+- No account registration or extra authorization needed.
 
 ---
 
-## Install
+## 🚀 Install
 
 | Platform | Status | Instructions |
 |:---|:---:|:---|
-| macOS | ✅ | Download the latest `.dmg` from [Releases](https://github.com/FirenzeLor/gemini-collector/releases), drag to Applications |
-| Windows | ✅ | Download the latest installer from [Releases](https://github.com/FirenzeLor/gemini-collector/releases) and run it |
+| macOS | ✅ | Download the latest `.dmg` from Releases, drag to Applications |
+| Windows | ✅ | Download the latest installer from Releases and run it |
 
 > **macOS "unverified developer" warning**: Go to **System Settings → Privacy & Security** and click "Open Anyway".
 >
 > **macOS "damaged" warning**: Run the following in Terminal, then reopen:
 > ```bash
-> xattr -cr /Applications/gemini-collector.app
+> xattr -cr /Applications/Chat-Vault.app
 > ```
 
 ---
 
-## Requirements
+## 🙏 Acknowledgements
 
-**macOS**
-- macOS 12+
-- Google Chrome installed and signed in to [Gemini](https://gemini.google.com)
-
-**Windows**
-- Windows 10 (1803+) or later
-- Sign in to Google within the app on first use (Chrome not required)
+This project (`Chat-Vault`) is heavily inspired by and built upon the excellent work of [**Nagi-ovo/gemini-voyager**](https://github.com/Nagi-ovo/gemini-voyager) and [**FirenzeLor/gemini-collector**](https://github.com/FirenzeLor/gemini-collector). We extend our deepest gratitude to the original authors for their open-source contributions. 
 
 ---
 
-## License
+## 📄 License
 
 [GNU AGPL-3.0](./LICENSE) — free to use, modify, and share. If you run a modified version as a network service, or distribute it, you must release the complete corresponding source code under the same license.
-
-**Dual licensing:** a separate [commercial license](./COMMERCIAL-LICENSE.md) is available for proprietary/closed-source or hosted use that cannot comply with the AGPL.

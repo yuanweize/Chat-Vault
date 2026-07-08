@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import ReactDOM from "react-dom";
 import { invoke } from "@tauri-apps/api/core";
 import { openUrl } from "@tauri-apps/plugin-opener";
+import { useTranslation } from "react-i18next";
 import { useTheme } from "../theme";
 import {
   CloseIcon,
@@ -51,6 +52,7 @@ interface Props {
 
 export function ResearchDetailModal({ state, onClose }: Props) {
   const t = useTheme();
+  const { t: tI18n } = useTranslation();
   const [tab, setTab] = useState<"progress" | "report">("report");
 
   useEffect(() => {
@@ -75,9 +77,7 @@ export function ResearchDetailModal({ state, onClose }: Props) {
   const overlay: React.CSSProperties = {
     position: "fixed",
     inset: 0,
-    background: t.isDark ? "rgba(0,0,0,0.62)" : "rgba(20,24,32,0.38)",
-    backdropFilter: "blur(6px)",
-    WebkitBackdropFilter: "blur(6px)",
+    background: t.isDark ? "rgba(0,0,0,0.7)" : "rgba(20,24,32,0.5)",
     display: "flex",
     alignItems: "center",
     justifyContent: "center",
@@ -85,14 +85,11 @@ export function ResearchDetailModal({ state, onClose }: Props) {
     padding: 24,
   };
   const card: React.CSSProperties = {
-    width: "min(1200px, 92vw)",
-    height: "min(880px, 88vh)",
-    background: t.isDark ? "#1c1f25" : "#ffffff",
-    borderRadius: 16,
-    boxShadow: t.isDark
-      ? "0 20px 60px rgba(0,0,0,0.55)"
-      : "0 20px 60px rgba(20,30,55,0.22)",
-    border: `1px solid ${t.divider}`,
+    background: t.appBg,
+    borderRadius: 8,
+    border: `2px solid ${t.border}`,
+    width: "90vw",
+    height: "90vh",
     display: "flex",
     flexDirection: "column",
     overflow: "hidden",
@@ -162,11 +159,11 @@ export function ResearchDetailModal({ state, onClose }: Props) {
                 minWidth: 0,
               }}
             >
-              {state.title || "研究报告"}
+              {state.title || tI18n("researchModal.report", "研究报告")}
             </div>
             {(() => {
               const bits: string[] = [];
-              if (state.charCount && state.charCount > 0) bits.push(`${state.charCount.toLocaleString()} 字`);
+              if (state.charCount && state.charCount > 0) bits.push(tI18n("chatview.words", { count: state.charCount.toLocaleString(), defaultValue: `${state.charCount.toLocaleString()} 字` }));
               if (state.sizeBytes && state.sizeBytes > 0) bits.push(formatBytes(state.sizeBytes));
               if (bits.length === 0) return null;
               return (
@@ -177,14 +174,14 @@ export function ResearchDetailModal({ state, onClose }: Props) {
             })()}
           </div>
           <div style={{ display: "flex", alignItems: "flex-end", gap: 2 }}>
-            {tabBtn("progress", "调研过程", !hasProgress)}
-            {tabBtn("report", "报告详情", !hasReport)}
+            {tabBtn("progress", tI18n("researchModal.progress", "调研过程"), !hasProgress)}
+            {tabBtn("report", tI18n("researchModal.reportDetails", "报告详情"), !hasReport)}
           </div>
           <div style={{ width: 8 }} />
           <button
             type="button"
             onClick={onClose}
-            aria-label="关闭"
+            aria-label={tI18n("researchModal.close", "关闭")}
             style={{
               background: "transparent",
               border: "none",
@@ -301,6 +298,7 @@ function ReportPanel({
   reportMediaId: string;
 }) {
   const t = useTheme();
+  const { t: tI18n } = useTranslation();
   const accent = t.isDark ? ACCENT_BLUE_DARK : ACCENT_BLUE;
   const [md, setMd] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
@@ -399,11 +397,11 @@ function ReportPanel({
             marginBottom: 8,
           }}
         >
-          目录
+          {tI18n("researchModal.toc", "目录")}
         </div>
         {toc.length === 0 && md !== null && (
           <div style={{ padding: "4px 10px", color: t.textMuted, fontSize: 12 }}>
-            本报告无小节标题
+            {tI18n("researchModal.noToc", "本报告无小节标题")}
           </div>
         )}
         {toc.map((item) => {
@@ -458,11 +456,11 @@ function ReportPanel({
           {md === null && !err && (
             <div style={{ display: "flex", alignItems: "center", gap: 8, color: t.textMuted, fontSize: 13 }}>
               <SpinnerIcon color={t.textMuted} />
-              正在加载报告…
+              {tI18n("researchModal.loadingReport", "正在加载报告…")}
             </div>
           )}
           {err && (
-            <div style={{ color: "#d84a3a", fontSize: 13 }}>加载失败：{err}</div>
+            <div style={{ color: "#d84a3a", fontSize: 13 }}>{tI18n("researchModal.loadFailed", { err, defaultValue: `加载失败：${err}` })}</div>
           )}
           {md !== null && !err && (
             <div style={{ maxWidth: 780, margin: "0 auto" }}>
@@ -507,6 +505,7 @@ function ProgressPanel({
   entryCount?: number;
 }) {
   const t = useTheme();
+  const { t: tI18n } = useTranslation();
   const accent = t.isDark ? ACCENT_BLUE_DARK : ACCENT_BLUE;
   const railColor = t.isDark ? "rgba(255,255,255,0.12)" : "rgba(0,0,0,0.08)";
   const [entries, setEntries] = useState<ProgressEntry[] | null>(null);
@@ -582,10 +581,10 @@ function ProgressPanel({
         {entries === null && !err && (
           <div style={{ display: "flex", alignItems: "center", gap: 8, color: t.textMuted, fontSize: 13 }}>
             <SpinnerIcon color={t.textMuted} />
-            正在加载调研过程…
+            {tI18n("researchModal.loadingProgress", "正在加载调研过程…")}
           </div>
         )}
-        {err && <div style={{ color: "#d84a3a", fontSize: 13 }}>加载失败：{err}</div>}
+        {err && <div style={{ color: "#d84a3a", fontSize: 13 }}>{tI18n("researchModal.loadFailed", { err, defaultValue: `加载失败：${err}` })}</div>}
         {entries !== null && !err && (
           <div style={{ position: "relative" }}>
             {/* 整条贯通竖线 */}
@@ -660,7 +659,7 @@ function ProgressPanel({
                           color: t.textMuted,
                         }}
                       >
-                        第 {g.round + 1} 轮
+                        {tI18n("researchModal.round", { round: g.round + 1, defaultValue: `第 ${g.round + 1} 轮` })}
                       </div>
                     </div>
                   )}
@@ -675,7 +674,7 @@ function ProgressPanel({
               );
             })}
             {grouped.length === 0 && (
-              <div style={{ color: t.textMuted, fontSize: 13 }}>暂无调研记录</div>
+              <div style={{ color: t.textMuted, fontSize: 13 }}>{tI18n("researchModal.noProgress", "暂无调研记录")}</div>
             )}
           </div>
         )}
@@ -831,6 +830,7 @@ function ProgressItem({
   accent: string;
 }) {
   const t = useTheme();
+  const { t: tI18n } = useTranslation();
   const isThinking = entry.type === "thinking";
 
   const dot = (
@@ -930,7 +930,7 @@ function ProgressItem({
                 flex: 1,
               }}
             >
-              {entry.filename || "文件"}
+              {entry.filename || tI18n("researchModal.file", "文件")}
             </div>
           </div>
         )}

@@ -76,7 +76,9 @@ impl GeminiExporter {
         let client = http_client::build_http_client(&cookies);
         Self {
             cookies,
-            user_spec: user_spec.map(|s| s.trim().to_string()).filter(|s| !s.is_empty()),
+            user_spec: user_spec
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty()),
             account_id_override: account_id_override
                 .map(|s| s.trim().to_string())
                 .filter(|s| !s.is_empty()),

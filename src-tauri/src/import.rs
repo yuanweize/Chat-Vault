@@ -41,25 +41,41 @@ fn summary_from_jsonl_meta(jsonl_file: &Path) -> Option<serde_json::Value> {
 
     for line in raw.lines() {
         let s = line.trim();
-        if s.is_empty() { continue; }
+        if s.is_empty() {
+            continue;
+        }
         let obj: serde_json::Value = match serde_json::from_str(s) {
             Ok(v) => v,
             Err(_) => continue,
         };
         match obj.get("type").and_then(|v| v.as_str()) {
-            Some("meta") => { if meta.is_none() { meta = Some(obj); } }
+            Some("meta") => {
+                if meta.is_none() {
+                    meta = Some(obj);
+                }
+            }
             Some("message") => {
-                if obj.get("hidden").and_then(|v| v.as_bool()).unwrap_or(false) { continue; }
+                if obj.get("hidden").and_then(|v| v.as_bool()).unwrap_or(false) {
+                    continue;
+                }
                 message_count += 1;
                 if let Some(text) = obj.get("text").and_then(|v| v.as_str()) {
-                    if !text.is_empty() { last_text = text.to_string(); }
+                    if !text.is_empty() {
+                        last_text = text.to_string();
+                    }
                 }
                 if let Some(atts) = obj.get("attachments").and_then(|v| v.as_array()) {
                     for att in atts {
                         let mime = att.get("mimeType").and_then(|v| v.as_str()).unwrap_or("");
-                        if mime.starts_with("image/") { image_count += 1; has_media = true; }
-                        else if mime.starts_with("video/") { video_count += 1; has_media = true; }
-                        else if !mime.is_empty() { has_media = true; }
+                        if mime.starts_with("image/") {
+                            image_count += 1;
+                            has_media = true;
+                        } else if mime.starts_with("video/") {
+                            video_count += 1;
+                            has_media = true;
+                        } else if !mime.is_empty() {
+                            has_media = true;
+                        }
                     }
                 }
             }
@@ -69,10 +85,25 @@ fn summary_from_jsonl_meta(jsonl_file: &Path) -> Option<serde_json::Value> {
 
     let meta = meta?;
     let id = meta.get("id").and_then(|v| v.as_str())?.to_string();
-    let title = meta.get("title").and_then(|v| v.as_str()).unwrap_or("").to_string();
-    let updated_at = meta.get("updatedAt").and_then(|v| v.as_str()).unwrap_or("").to_string();
-    let created_at = meta.get("createdAt").and_then(|v| v.as_str()).unwrap_or("").to_string();
-    let remote_hash = meta.get("remoteHash").cloned().unwrap_or(serde_json::Value::Null);
+    let title = meta
+        .get("title")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+    let updated_at = meta
+        .get("updatedAt")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+    let created_at = meta
+        .get("createdAt")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+    let remote_hash = meta
+        .get("remoteHash")
+        .cloned()
+        .unwrap_or(serde_json::Value::Null);
     let last_msg: String = last_text.chars().take(80).collect();
 
     Some(serde_json::json!({
@@ -94,7 +125,8 @@ fn rebuild_conversations_index(target_dir: &Path) -> Result<(), String> {
     let target_conv_dir = target_dir.join("conversations");
     let target_conv_file = target_dir.join("conversations.json");
 
-    let mut items: std::collections::HashMap<String, serde_json::Value> = std::collections::HashMap::new();
+    let mut items: std::collections::HashMap<String, serde_json::Value> =
+        std::collections::HashMap::new();
 
     // 先加载已有索引
     if target_conv_file.exists() {
@@ -117,7 +149,9 @@ fn rebuild_conversations_index(target_dir: &Path) -> Result<(), String> {
         for entry in std::fs::read_dir(&target_conv_dir).str_err()? {
             let entry = entry.str_err()?;
             let path = entry.path();
-            if !storage::is_jsonl_file(&path) { continue; }
+            if !storage::is_jsonl_file(&path) {
+                continue;
+            }
             if let Some(summary) = summary_from_jsonl_meta(&path) {
                 if let Some(id) = summary.get("id").and_then(|v| v.as_str()) {
                     items.insert(id.to_string(), summary);
@@ -128,8 +162,11 @@ fn rebuild_conversations_index(target_dir: &Path) -> Result<(), String> {
 
     let items_vec: Vec<serde_json::Value> = items.into_values().collect();
     let out = serde_json::json!({ "items": items_vec });
-    std::fs::write(&target_conv_file, serde_json::to_string_pretty(&out).str_err()?)
-        .str_err()
+    std::fs::write(
+        &target_conv_file,
+        serde_json::to_string_pretty(&out).str_err()?,
+    )
+    .str_err()
 }
 
 fn merge_jsonl(existing_path: &Path, src_path: &Path) -> Result<(), String> {
@@ -138,10 +175,18 @@ fn merge_jsonl(existing_path: &Path, src_path: &Path) -> Result<(), String> {
         let mut msgs = Vec::new();
         for line in raw.lines() {
             let s = line.trim();
-            if s.is_empty() { continue; }
-            let Ok(obj) = serde_json::from_str::<serde_json::Value>(s) else { continue; };
+            if s.is_empty() {
+                continue;
+            }
+            let Ok(obj) = serde_json::from_str::<serde_json::Value>(s) else {
+                continue;
+            };
             match obj.get("type").and_then(|v| v.as_str()) {
-                Some("meta") => { if meta.is_none() { meta = Some(obj); } }
+                Some("meta") => {
+                    if meta.is_none() {
+                        meta = Some(obj);
+                    }
+                }
                 Some("message") => msgs.push(obj),
                 _ => {}
             }
@@ -154,28 +199,49 @@ fn merge_jsonl(existing_path: &Path, src_path: &Path) -> Result<(), String> {
     let (existing_meta, existing_msgs) = parse(&existing_raw);
     let (src_meta, src_msgs) = parse(&src_raw);
 
-    let existing_updated = existing_meta.as_ref()
-        .and_then(|m| m.get("updatedAt").and_then(|v| v.as_str())).unwrap_or("");
-    let src_updated = src_meta.as_ref()
-        .and_then(|m| m.get("updatedAt").and_then(|v| v.as_str())).unwrap_or("");
+    let existing_updated = existing_meta
+        .as_ref()
+        .and_then(|m| m.get("updatedAt").and_then(|v| v.as_str()))
+        .unwrap_or("");
+    let src_updated = src_meta
+        .as_ref()
+        .and_then(|m| m.get("updatedAt").and_then(|v| v.as_str()))
+        .unwrap_or("");
     let src_is_newer = src_updated > existing_updated;
 
-    let winner_meta = if src_is_newer { src_meta } else { existing_meta };
+    let winner_meta = if src_is_newer {
+        src_meta
+    } else {
+        existing_meta
+    };
     let winner_meta = winner_meta.unwrap_or_else(|| serde_json::json!({"type": "meta"}));
 
-    let mut msg_map: std::collections::HashMap<String, serde_json::Value> = std::collections::HashMap::new();
+    let mut msg_map: std::collections::HashMap<String, serde_json::Value> =
+        std::collections::HashMap::new();
     let (loser_msgs, winner_msgs) = if src_is_newer {
         (&existing_msgs, &src_msgs)
     } else {
         (&src_msgs, &existing_msgs)
     };
     for msg in loser_msgs {
-        let id = msg.get("id").and_then(|v| v.as_str()).unwrap_or("").to_string();
-        if !id.is_empty() { msg_map.insert(id, msg.clone()); }
+        let id = msg
+            .get("id")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        if !id.is_empty() {
+            msg_map.insert(id, msg.clone());
+        }
     }
     for msg in winner_msgs {
-        let id = msg.get("id").and_then(|v| v.as_str()).unwrap_or("").to_string();
-        if !id.is_empty() { msg_map.insert(id, msg.clone()); }
+        let id = msg
+            .get("id")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        if !id.is_empty() {
+            msg_map.insert(id, msg.clone());
+        }
     }
 
     let mut merged: Vec<serde_json::Value> = msg_map.into_values().collect();
@@ -212,8 +278,12 @@ fn do_import(src_dir: &Path, target_dir: &Path) -> Result<String, String> {
         for entry in std::fs::read_dir(&src_conv_dir).str_err()? {
             let entry = entry.str_err()?;
             let path = entry.path();
-            if !entry.file_type().str_err()?.is_file() { continue; }
-            if !storage::is_jsonl_file(&path) { continue; }
+            if !entry.file_type().str_err()?.is_file() {
+                continue;
+            }
+            if !storage::is_jsonl_file(&path) {
+                continue;
+            }
             let target_path = target_conv_dir.join(path.file_name().unwrap());
             if target_path.exists() {
                 merge_jsonl(&target_path, &path)?;
@@ -228,7 +298,9 @@ fn do_import(src_dir: &Path, target_dir: &Path) -> Result<String, String> {
     if src_media_dir.exists() {
         for entry in std::fs::read_dir(&src_media_dir).str_err()? {
             let entry = entry.str_err()?;
-            if !entry.file_type().str_err()?.is_file() { continue; }
+            if !entry.file_type().str_err()?.is_file() {
+                continue;
+            }
             let target_path = target_media_dir.join(entry.file_name());
             if target_path.exists() {
                 skipped_media += 1;
@@ -250,11 +322,16 @@ fn do_import(src_dir: &Path, target_dir: &Path) -> Result<String, String> {
     .str_err()
 }
 
-fn import_account_zip_impl(data_dir: &Path, account_id: &str, zip_path: &Path) -> Result<String, String> {
+fn import_account_zip_impl(
+    data_dir: &Path,
+    account_id: &str,
+    zip_path: &Path,
+) -> Result<String, String> {
     use std::io::Read;
 
     let file = std::fs::File::open(zip_path).map_err(|e| format!("打开 ZIP 失败: {}", e))?;
-    let mut archive = zip::ZipArchive::new(file).map_err(|e| format!("读取 ZIP 格式失败: {}", e))?;
+    let mut archive =
+        zip::ZipArchive::new(file).map_err(|e| format!("读取 ZIP 格式失败: {}", e))?;
 
     let tmp_id = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -308,8 +385,12 @@ fn import_account_zip_impl(data_dir: &Path, account_id: &str, zip_path: &Path) -
             if let Ok(raw) = std::fs::read_to_string(&meta_file) {
                 if let Ok(mut meta) = serde_json::from_str::<serde_json::Value>(&raw) {
                     if let Some(obj) = meta.as_object_mut() {
-                        obj.insert("conversationCount".to_string(), serde_json::json!(conv_count));
-                        let now = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
+                        obj.insert(
+                            "conversationCount".to_string(),
+                            serde_json::json!(conv_count),
+                        );
+                        let now =
+                            chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
                         obj.insert("lastSyncAt".to_string(), serde_json::json!(now));
                         obj.insert("lastSyncResult".to_string(), serde_json::json!("success"));
                         if let Ok(serialized) = serde_json::to_string_pretty(&meta) {
@@ -344,7 +425,12 @@ pub async fn import_account_zip(
     .await
     .str_err()??;
 
-    let account_dir = app.path().app_data_dir().str_err()?.join("accounts").join(&account_id);
+    let account_dir = app
+        .path()
+        .app_data_dir()
+        .str_err()?
+        .join("accounts")
+        .join(&account_id);
     let conversations_dir = account_dir.join("conversations");
     if let Ok(index) = search::open_or_create_index(&account_dir) {
         let _ = search::index_all(&index, &account_dir, &conversations_dir);

@@ -218,10 +218,7 @@ pub fn load_media_manifest(dir: &Path) -> HashMap<String, String> {
 pub fn save_media_manifest(dir: &Path, url_to_name: &HashMap<String, String>) -> Result<()> {
     let manifest_file = dir.join("media_manifest.json");
     let data = json!({ "url_to_name": url_to_name });
-    std::fs::write(
-        &manifest_file,
-        serde_json::to_string_pretty(&data)?,
-    )?;
+    std::fs::write(&manifest_file, serde_json::to_string_pretty(&data)?)?;
     Ok(())
 }
 
@@ -229,7 +226,9 @@ pub fn build_media_id_to_url_map(account_dir: &Path) -> HashMap<String, String> 
     let url_to_name = load_media_manifest(account_dir);
     let mut media_to_url = HashMap::new();
     for (url, media_name) in &url_to_name {
-        media_to_url.entry(media_name.clone()).or_insert_with(|| url.clone());
+        media_to_url
+            .entry(media_name.clone())
+            .or_insert_with(|| url.clone());
     }
     media_to_url
 }
@@ -465,7 +464,11 @@ pub fn count_media_types_from_rows(rows: &[Value]) -> (usize, usize, usize) {
             None => continue,
         };
         for att in attachments {
-            if let Some(mime) = att.as_object().and_then(|o| o.get("mimeType")).and_then(|v| v.as_str()) {
+            if let Some(mime) = att
+                .as_object()
+                .and_then(|o| o.get("mimeType"))
+                .and_then(|v| v.as_str())
+            {
                 let lower = mime.to_lowercase();
                 if lower.starts_with("image/") {
                     images += 1;
@@ -547,6 +550,95 @@ fn sort_parsed_turns_by_timestamp(parsed_turns: &[Value]) -> Vec<Value> {
 
 fn new_media_id(ext: &str) -> String {
     format!("{}.{}", Uuid::new_v4().to_string().replace("-", ""), ext)
+}
+
+
+fn process_deep_research(dr_val: &Value, media_dir: &Path) -> Option<Value> {
+    let mut dr = dr_val.clone();
+    if dr.get("type").and_then(|v| v.as_str()) == Some("report") {
+        if let Some(text) = dr.get("report_text").and_then(|v| v.as_str()) {
+            if !text.is_empty() {
+                let media_id = new_media_id("md");
+                let size_bytes = text.as_bytes().len();
+                let char_count = text.chars().count();
+                let _ = std::fs::write(media_dir.join(&media_id), text.as_bytes());
+                if let Some(o) = dr.as_object_mut() {
+                    o.remove("report_text");
+                    o.insert("report_media_id".to_string(), json!(media_id));
+                    o.insert("size_bytes".to_string(), json!(size_bytes));
+                    o.insert("char_count".to_string(), json!(char_count));
+                }
+            }
+        }
+        if let Some(entries) = dr.get("progress").and_then(|v| v.as_array()).cloned() {
+            if !entries.is_empty() {
+                let entry_count = entries.len();
+                let mut rounds: i64 = 0;
+                let mut thinking_count: usize = 0;
+                let mut web_count: usize = 0;
+                let mut file_count: usize = 0;
+                for e in &entries {
+                    match e.get("type").and_then(|v| v.as_str()) {
+                        Some("thinking") => {
+                            thinking_count += 1;
+                            if let Some(r) = e.get("round").and_then(|v| v.as_i64()) {
+                                if r + 1 > rounds {
+                                    rounds = r + 1;
+                                }
+                            }
+                        }
+                        Some("web_search") => web_count += 1,
+                        Some("file_search") => file_count += 1,
+                        _ => {}
+                    }
+                }
+                let payload = Value::Array(entries);
+                let serialized = serde_json::to_vec(&payload).unwrap_or_else(|_| b"[]".to_vec());
+                let media_id = new_media_id("json");
+                let size_bytes = serialized.len();
+                let _ = std::fs::write(media_dir.join(&media_id), &serialized);
+                if let Some(o) = dr.as_object_mut() {
+                    o.remove("progress");
+                    o.insert("progress_media_id".to_string(), json!(media_id));
+                    o.insert("progress_size_bytes".to_string(), json!(size_bytes));
+                    o.insert("entry_count".to_string(), json!(entry_count));
+                    o.insert("rounds".to_string(), json!(rounds));
+                    o.insert("thinking_count".to_string(), json!(thinking_count));
+                    o.insert("web_count".to_string(), json!(web_count));
+                    o.insert("file_count".to_string(), json!(file_count));
+                }
+            }
+        }
+    }
+    Some(dr)
+}
+
+fn process_canvas_array(canvas_arr: &[Value], media_dir: &Path) -> Vec<Value> {
+    let mut externalized: Vec<Value> = Vec::new();
+    for canvas in canvas_arr {
+        let mut cv = canvas.clone();
+        if let Some(content) = cv.get("content").and_then(|v| v.as_str()) {
+            if !content.is_empty() {
+                let ext = cv
+                    .get("filename")
+                    .and_then(|v| v.as_str())
+                    .and_then(|f| f.rsplit(".").next())
+                    .unwrap_or("txt");
+                let media_id = new_media_id(ext);
+                let size_bytes = content.as_bytes().len();
+                let char_count = content.chars().count();
+                let _ = std::fs::write(media_dir.join(&media_id), content.as_bytes());
+                if let Some(o) = cv.as_object_mut() {
+                    o.remove("content");
+                    o.insert("content_media_id".to_string(), json!(media_id));
+                    o.insert("size_bytes".to_string(), json!(size_bytes));
+                    o.insert("char_count".to_string(), json!(char_count));
+                }
+            }
+        }
+        externalized.push(cv);
+    }
+    externalized
 }
 
 pub fn turns_to_jsonl_rows(
@@ -644,8 +736,6 @@ pub fn turns_to_jsonl_rows(
             .and_then(|v| v.as_str())
             .unwrap_or("");
 
-        // Deep Research report turn：assistant 行用 ai[12][8]["57"][0][5] 的报告完成时间
-        // （user 行保持原 turn[4][0]，不受影响）。字段缺失时回落到 turn ts。
         let model_ts = asst
             .and_then(|a| a.get("deep_research"))
             .and_then(|dr| {
@@ -668,7 +758,10 @@ pub fn turns_to_jsonl_rows(
             "model": model,
         });
 
-        if let Some(thinking) = asst.and_then(|a| a.get("thinking")).and_then(|v| v.as_str()) {
+        if let Some(thinking) = asst
+            .and_then(|a| a.get("thinking"))
+            .and_then(|v| v.as_str())
+        {
             if !thinking.is_empty() {
                 model_row["thinking"] = json!(thinking);
             }
@@ -685,96 +778,24 @@ pub fn turns_to_jsonl_rows(
         }
         if let Some(deep_research) = asst.and_then(|a| a.get("deep_research")) {
             if !deep_research.is_null() {
-                let mut dr = deep_research.clone();
-                // 报告正文外置到 media 文件
-                if dr.get("type").and_then(|v| v.as_str()) == Some("report") {
-                    if let Some(text) = dr.get("report_text").and_then(|v| v.as_str()) {
-                        if !text.is_empty() {
-                            let media_id = new_media_id("md");
-                            let size_bytes = text.as_bytes().len();
-                            let char_count = text.chars().count();
-                            let _ = std::fs::write(media_dir.join(&media_id), text.as_bytes());
-                            dr.as_object_mut().map(|o| {
-                                o.remove("report_text");
-                                o.insert("report_media_id".to_string(), json!(media_id));
-                                o.insert("size_bytes".to_string(), json!(size_bytes));
-                                o.insert("char_count".to_string(), json!(char_count));
-                            });
-                        }
-                    }
-                    // 调研过程外置到 JSON media 文件，并注入统计字段
-                    if let Some(entries) = dr.get("progress").and_then(|v| v.as_array()).cloned() {
-                        if !entries.is_empty() {
-                            let entry_count = entries.len();
-                            let mut rounds: i64 = 0;
-                            let mut thinking_count: usize = 0;
-                            let mut web_count: usize = 0;
-                            let mut file_count: usize = 0;
-                            for e in &entries {
-                                match e.get("type").and_then(|v| v.as_str()) {
-                                    Some("thinking") => {
-                                        thinking_count += 1;
-                                        if let Some(r) = e.get("round").and_then(|v| v.as_i64()) {
-                                            if r + 1 > rounds { rounds = r + 1; }
-                                        }
-                                    }
-                                    Some("web_search") => web_count += 1,
-                                    Some("file_search") => file_count += 1,
-                                    _ => {}
-                                }
-                            }
-                            let payload = Value::Array(entries);
-                            let serialized = serde_json::to_vec(&payload).unwrap_or_else(|_| b"[]".to_vec());
-                            let media_id = new_media_id("json");
-                            let size_bytes = serialized.len();
-                            let _ = std::fs::write(media_dir.join(&media_id), &serialized);
-                            dr.as_object_mut().map(|o| {
-                                o.remove("progress");
-                                o.insert("progress_media_id".to_string(), json!(media_id));
-                                o.insert("progress_size_bytes".to_string(), json!(size_bytes));
-                                o.insert("entry_count".to_string(), json!(entry_count));
-                                o.insert("rounds".to_string(), json!(rounds));
-                                o.insert("thinking_count".to_string(), json!(thinking_count));
-                                o.insert("web_count".to_string(), json!(web_count));
-                                o.insert("file_count".to_string(), json!(file_count));
-                            });
-                        }
-                    }
+                if let Some(dr) = process_deep_research(deep_research, media_dir) {
+                    model_row["deepResearch"] = dr;
                 }
-                model_row["deepResearch"] = dr;
             }
         }
-        if let Some(canvas_arr) = asst.and_then(|a| a.get("canvas")).and_then(|v| v.as_array()) {
+        if let Some(canvas_arr) = asst
+            .and_then(|a| a.get("canvas"))
+            .and_then(|v| v.as_array())
+        {
             if !canvas_arr.is_empty() {
-                let mut externalized: Vec<Value> = Vec::new();
-                for canvas in canvas_arr {
-                    let mut cv = canvas.clone();
-                    // Canvas 代码内容外置到 media 文件
-                    if let Some(content) = cv.get("content").and_then(|v| v.as_str()) {
-                        if !content.is_empty() {
-                            let ext = cv.get("filename")
-                                .and_then(|v| v.as_str())
-                                .and_then(|f| f.rsplit('.').next())
-                                .unwrap_or("txt");
-                            let media_id = new_media_id(ext);
-                            let size_bytes = content.as_bytes().len();
-                            let char_count = content.chars().count();
-                            let _ = std::fs::write(media_dir.join(&media_id), content.as_bytes());
-                            cv.as_object_mut().map(|o| {
-                                o.remove("content");
-                                o.insert("content_media_id".to_string(), json!(media_id));
-                                o.insert("size_bytes".to_string(), json!(size_bytes));
-                                o.insert("char_count".to_string(), json!(char_count));
-                            });
-                        }
-                    }
-                    externalized.push(cv);
-                }
+                let externalized = process_canvas_array(canvas_arr, media_dir);
                 model_row["canvas"] = json!(externalized);
             }
         }
-        // content_blocks 直接透传（已由 turn_parser 生成）
-        if let Some(blocks) = asst.and_then(|a| a.get("content_blocks")).and_then(|v| v.as_array()) {
+        if let Some(blocks) = asst
+            .and_then(|a| a.get("content_blocks"))
+            .and_then(|v| v.as_array())
+        {
             if !blocks.is_empty() {
                 model_row["contentBlocks"] = json!(blocks);
             }
@@ -782,11 +803,11 @@ pub fn turns_to_jsonl_rows(
         rows.push(model_row);
     }
 
-    // 标记 action_card 消息为 hidden（仅处理 message 行，跳过第一行 meta）
     mark_action_card_hidden(&mut rows);
 
     rows
 }
+
 
 /// 检测 action_card 消息并标记 hidden: true，同时标记其前面关联的 user 消息。
 fn mark_action_card_hidden(rows: &mut [Value]) {
@@ -845,10 +866,7 @@ fn build_attachments(files: Option<&Value>) -> Vec<Value> {
         .filter_map(|f| {
             let obj = f.as_object()?;
             let media_id = obj.get("media_id")?.as_str().filter(|s| !s.is_empty())?;
-            let mime = obj
-                .get("mime")
-                .and_then(|v| v.as_str())
-                .unwrap_or("");
+            let mime = obj.get("mime").and_then(|v| v.as_str()).unwrap_or("");
             let mut item = json!({ "mediaId": media_id, "mimeType": mime });
             if let Some(preview_id) = obj.get("preview_media_id").and_then(|v| v.as_str()) {
                 if !preview_id.is_empty() {
@@ -1009,7 +1027,11 @@ pub fn load_conversations_index(account_dir: &Path) -> (Vec<String>, HashMap<Str
     let mut ordered_ids = Vec::new();
     let mut index_map = HashMap::new();
     for item in items {
-        if let Some(cid) = item.get("id").and_then(|v| v.as_str()).filter(|s| !s.is_empty()) {
+        if let Some(cid) = item
+            .get("id")
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty())
+        {
             ordered_ids.push(cid.to_string());
             index_map.insert(cid.to_string(), item.clone());
         }
@@ -1051,10 +1073,7 @@ fn get_int_field(obj: &Value, key: &str, default: i64) -> i64 {
 pub fn build_lost_summary(bare_id: &str, existing: Option<&Value>) -> Value {
     let empty = json!({});
     let e = existing.unwrap_or(&empty);
-    let last_message = e
-        .get("lastMessage")
-        .and_then(|v| v.as_str())
-        .unwrap_or("");
+    let last_message = e.get("lastMessage").and_then(|v| v.as_str()).unwrap_or("");
     let message_count = get_int_field(e, "messageCount", 0);
     let image_count = get_int_field(e, "imageCount", 0);
     let video_count = get_int_field(e, "videoCount", 0);
@@ -1070,6 +1089,7 @@ pub fn build_lost_summary(bare_id: &str, existing: Option<&Value>) -> Value {
         "videoCount": video_count,
         "updatedAt": e.get("updatedAt"),
         "remoteHash": e.get("remoteHash"),
+        "folderId": e.get("folderId"),
         "status": CONVERSATION_STATUS_LOST,
     })
 }
@@ -1078,9 +1098,8 @@ pub fn build_summary_from_chat_listing(chat: &Value, existing: Option<&Value>) -
     let empty = json!({});
     let e = existing.unwrap_or(&empty);
     let status = status_for_remote_summary(existing);
-    let bare_id = crate::protocol::strip_c_prefix(
-        chat.get("id").and_then(|v| v.as_str()).unwrap_or(""),
-    );
+    let bare_id =
+        crate::protocol::strip_c_prefix(chat.get("id").and_then(|v| v.as_str()).unwrap_or(""));
     let title = chat
         .get("title")
         .and_then(|v| v.as_str())
@@ -1092,8 +1111,12 @@ pub fn build_summary_from_chat_listing(chat: &Value, existing: Option<&Value>) -
     {
         Some(ts) => (to_iso_utc(Some(ts)), Some(ts.to_string())),
         None => (
-            e.get("updatedAt").and_then(|v| v.as_str()).map(|s| s.to_string()),
-            e.get("remoteHash").and_then(|v| v.as_str()).map(|s| s.to_string()),
+            e.get("updatedAt")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string()),
+            e.get("remoteHash")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string()),
         ),
     };
 
@@ -1112,6 +1135,7 @@ pub fn build_summary_from_chat_listing(chat: &Value, existing: Option<&Value>) -
         "videoCount": video_count,
         "updatedAt": updated_at,
         "remoteHash": remote_hash,
+        "folderId": e.get("folderId"),
         "status": status,
     })
 }
@@ -1119,7 +1143,11 @@ pub fn build_summary_from_chat_listing(chat: &Value, existing: Option<&Value>) -
 pub fn filter_display_rows(msg_rows: &[Value]) -> Vec<Value> {
     let mut to_remove = HashSet::new();
     for (i, row) in msg_rows.iter().enumerate() {
-        let text = match row.as_object().and_then(|o| o.get("text")).and_then(|v| v.as_str()) {
+        let text = match row
+            .as_object()
+            .and_then(|o| o.get("text"))
+            .and_then(|v| v.as_str())
+        {
             Some(t) => t,
             None => continue,
         };
@@ -1175,6 +1203,63 @@ pub fn count_jsonl_files(conversations_dir: &Path) -> Result<u64, String> {
         }
     }
     Ok(count)
+}
+
+// ============================================================================
+// Folders Management
+// ============================================================================
+
+pub fn load_folders(account_dir: &Path) -> Vec<Value> {
+    let file = account_dir.join("folders.json");
+    if !file.exists() {
+        return Vec::new();
+    }
+    std::fs::read_to_string(&file)
+        .ok()
+        .and_then(|c| serde_json::from_str::<Vec<Value>>(&c).ok())
+        .unwrap_or_default()
+}
+
+pub fn save_folders(account_dir: &Path, folders: &[Value]) -> anyhow::Result<()> {
+    std::fs::write(
+        account_dir.join("folders.json"),
+        serde_json::to_string_pretty(folders)?,
+    )?;
+    Ok(())
+}
+
+pub fn set_conversation_folder(
+    account_dir: &Path,
+    conversation_id: &str,
+    folder_id: Option<&str>,
+) -> anyhow::Result<()> {
+    let index_file = account_dir.join("conversations.json");
+    if index_file.exists() {
+        if let Ok(content) = std::fs::read_to_string(&index_file) {
+            if let Ok(mut data) = serde_json::from_str::<Value>(&content) {
+                if let Some(items) = data.get_mut("items").and_then(|v| v.as_array_mut()) {
+                    let mut modified = false;
+                    for item in items.iter_mut() {
+                        if item.get("id").and_then(|v| v.as_str()) == Some(conversation_id) {
+                            if let Some(obj) = item.as_object_mut() {
+                                if let Some(fid) = folder_id {
+                                    obj.insert("folderId".to_string(), json!(fid));
+                                } else {
+                                    obj.remove("folderId");
+                                }
+                                modified = true;
+                            }
+                            break;
+                        }
+                    }
+                    if modified {
+                        let _ = std::fs::write(&index_file, serde_json::to_string_pretty(&data)?);
+                    }
+                }
+            }
+        }
+    }
+    Ok(())
 }
 
 pub fn conversation_count_from_index(account_dir: &Path) -> Option<u64> {
@@ -1273,7 +1358,9 @@ mod tests {
 
         let rows = turns_to_jsonl_rows(
             &[turn],
-            "conv_1", "account_1", "测试对话",
+            "conv_1",
+            "account_1",
+            "测试对话",
             &json!({}),
             &media_dir,
         );
@@ -1284,7 +1371,10 @@ mod tests {
         let dr = model_row.get("deepResearch").unwrap();
 
         // report_text 应被移除，替换为 report_media_id
-        assert!(dr.get("report_text").is_none(), "report_text 不应在 JSONL 中");
+        assert!(
+            dr.get("report_text").is_none(),
+            "report_text 不应在 JSONL 中"
+        );
         let media_id = dr.get("report_media_id").and_then(|v| v.as_str()).unwrap();
         assert!(media_id.ends_with(".md"));
 
@@ -1346,7 +1436,9 @@ mod tests {
 
         let rows = turns_to_jsonl_rows(
             &[turn],
-            "conv_2", "account_1", "测试对话",
+            "conv_2",
+            "account_1",
+            "测试对话",
             &json!({}),
             &media_dir,
         );
@@ -1358,7 +1450,10 @@ mod tests {
         // 第一个 canvas
         let cv0 = &cv_arr[0];
         assert!(cv0.get("content").is_none(), "content 不应在 JSONL 中");
-        let media_id_a = cv0.get("content_media_id").and_then(|v| v.as_str()).unwrap();
+        let media_id_a = cv0
+            .get("content_media_id")
+            .and_then(|v| v.as_str())
+            .unwrap();
         assert!(media_id_a.ends_with(".html"));
         let file_a = std::fs::read_to_string(media_dir.join(media_id_a)).unwrap();
         assert_eq!(file_a, canvas_content_a);
@@ -1367,7 +1462,10 @@ mod tests {
 
         // 第二个 canvas
         let cv1 = &cv_arr[1];
-        let media_id_b = cv1.get("content_media_id").and_then(|v| v.as_str()).unwrap();
+        let media_id_b = cv1
+            .get("content_media_id")
+            .and_then(|v| v.as_str())
+            .unwrap();
         let file_b = std::fs::read_to_string(media_dir.join(media_id_b)).unwrap();
         assert_eq!(file_b, canvas_content_b);
         assert_eq!(cv1["title"], "页面B");
@@ -1413,7 +1511,9 @@ mod tests {
 
         let rows = turns_to_jsonl_rows(
             &[turn],
-            "conv_3", "account_1", "测试对话",
+            "conv_3",
+            "account_1",
+            "测试对话",
             &json!({}),
             &media_dir,
         );
@@ -1423,7 +1523,10 @@ mod tests {
         assert!(dr.get("progress").is_none(), "progress 数组不应在 JSONL 中");
 
         // media 文件存在且内容等于原数组
-        let media_id = dr.get("progress_media_id").and_then(|v| v.as_str()).unwrap();
+        let media_id = dr
+            .get("progress_media_id")
+            .and_then(|v| v.as_str())
+            .unwrap();
         assert!(media_id.ends_with(".json"));
         let content = std::fs::read_to_string(media_dir.join(media_id)).unwrap();
         let parsed: Value = serde_json::from_str(&content).unwrap();
@@ -1435,7 +1538,12 @@ mod tests {
         assert_eq!(dr["thinking_count"], json!(2));
         assert_eq!(dr["web_count"], json!(2));
         assert_eq!(dr["file_count"], json!(1));
-        assert!(dr.get("progress_size_bytes").and_then(|v| v.as_u64()).unwrap() > 0);
+        assert!(
+            dr.get("progress_size_bytes")
+                .and_then(|v| v.as_u64())
+                .unwrap()
+                > 0
+        );
     }
 
     #[test]
@@ -1463,7 +1571,9 @@ mod tests {
 
         let rows = turns_to_jsonl_rows(
             &[turn],
-            "conv_4", "account_1", "测试",
+            "conv_4",
+            "account_1",
+            "测试",
             &json!({}),
             &media_dir,
         );

@@ -50,7 +50,10 @@ pub fn read_webview_session_cookies(webview_data_dir: &Path) -> Result<HashMap<S
 /// Open SQLite in immutable mode — bypasses file locks held by a running WebView2.
 fn read_cookies_from_db_immutable(db_path: &Path, key: &[u8]) -> Result<HashMap<String, String>> {
     // SQLite URI on Windows: forward slashes, encode spaces, file:/ prefix
-    let path_str = db_path.to_string_lossy().replace('\\', "/").replace(' ', "%20");
+    let path_str = db_path
+        .to_string_lossy()
+        .replace('\\', "/")
+        .replace(' ', "%20");
     // Try multiple URI formats — Windows SQLite URI handling can be finicky
     let uris = [
         format!("file:///{}?immutable=1", path_str),
@@ -69,7 +72,8 @@ fn read_cookies_from_db_immutable(db_path: &Path, key: &[u8]) -> Result<HashMap<
             }
         }
     }
-    Err(last_err.unwrap()).with_context(|| format!("所有 immutable URI 格式均失败: {}", db_path.display()))
+    Err(last_err.unwrap())
+        .with_context(|| format!("所有 immutable URI 格式均失败: {}", db_path.display()))
 }
 
 fn read_cookies_from_db(db_path: &Path, key: &[u8]) -> Result<HashMap<String, String>> {
@@ -103,7 +107,12 @@ fn read_cookies_from_conn(conn: &Connection, key: &[u8]) -> Result<HashMap<Strin
             match decrypt_webview2_cookie(&encrypted_value, key) {
                 Ok(v) => v,
                 Err(e) => {
-                    log::warn!("webview2 decrypt failed for '{}' on {}: {}", name, domain, e);
+                    log::warn!(
+                        "webview2 decrypt failed for '{}' on {}: {}",
+                        name,
+                        domain,
+                        e
+                    );
                     continue;
                 }
             }
@@ -194,7 +203,9 @@ fn decrypt_dpapi_fallback(data: &[u8]) -> Result<String> {
                 extern "system" {
                     fn LocalFree(hmem: *mut core::ffi::c_void) -> *mut core::ffi::c_void;
                 }
-                unsafe { LocalFree(self.0 as _); }
+                unsafe {
+                    LocalFree(self.0 as _);
+                }
             }
         }
     }

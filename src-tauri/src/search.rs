@@ -57,14 +57,11 @@ pub fn open_or_create_index(account_dir: &Path) -> Result<Index, String> {
     }
 
     let index_dir = account_dir.join(INDEX_DIR_NAME);
-    std::fs::create_dir_all(&index_dir)
-        .map_err(|e| format!("创建索引目录失败: {}", e))?;
+    std::fs::create_dir_all(&index_dir).map_err(|e| format!("创建索引目录失败: {}", e))?;
 
     let schema = build_schema();
-    let dir = MmapDirectory::open(&index_dir)
-        .map_err(|e| format!("打开索引目录失败: {}", e))?;
-    let index = Index::open_or_create(dir, schema)
-        .map_err(|e| format!("打开索引失败: {}", e))?;
+    let dir = MmapDirectory::open(&index_dir).map_err(|e| format!("打开索引目录失败: {}", e))?;
+    let index = Index::open_or_create(dir, schema).map_err(|e| format!("打开索引失败: {}", e))?;
     register_tokenizers(&index);
 
     Ok(index)
@@ -86,8 +83,7 @@ fn load_mtimes(account_dir: &Path) -> HashMap<String, f64> {
 
 fn save_mtimes(account_dir: &Path, mtimes: &HashMap<String, f64>) -> Result<(), String> {
     let json = serde_json::to_string(mtimes).str_err()?;
-    std::fs::write(mtime_path(account_dir), json)
-        .map_err(|e| format!("保存 mtime 文件失败: {}", e))
+    std::fs::write(mtime_path(account_dir), json).map_err(|e| format!("保存 mtime 文件失败: {}", e))
 }
 
 fn file_mtime(path: &Path) -> f64 {
@@ -269,20 +265,29 @@ pub fn index_all(
 
     log::info!(
         "[index_all] scan done: total={}, indexed={}, skipped={}, deleted={}, elapsed={}ms",
-        total, indexed, skipped, deleted, t0.elapsed().as_millis()
+        total,
+        indexed,
+        skipped,
+        deleted,
+        t0.elapsed().as_millis()
     );
 
     let t_commit = std::time::Instant::now();
     writer
         .commit()
         .map_err(|e| format!("提交索引失败: {}", e))?;
-    log::info!("[index_all] commit done: elapsed={}ms", t_commit.elapsed().as_millis());
+    log::info!(
+        "[index_all] commit done: elapsed={}ms",
+        t_commit.elapsed().as_millis()
+    );
 
     save_mtimes(account_dir, &mtimes)?;
 
     log::info!(
         "[index_all] complete: total={}, indexed={}, total_elapsed={}ms",
-        total, indexed, t0.elapsed().as_millis()
+        total,
+        indexed,
+        t0.elapsed().as_millis()
     );
 
     Ok(total)
@@ -302,19 +307,23 @@ pub fn merge_segments(index: &Index) -> Result<(), String> {
         .writer(WRITER_HEAP)
         .map_err(|e| format!("创建 writer 失败: {}", e))?;
     let _ = writer.merge(&seg_ids).wait();
-    writer.commit().map_err(|e| format!("合并提交失败: {}", e))?;
+    writer
+        .commit()
+        .map_err(|e| format!("合并提交失败: {}", e))?;
     let _ = writer.garbage_collect_files().wait();
-    writer.wait_merging_threads().map_err(|e| format!("等待合并失败: {}", e))?;
-    log::info!("[merge_segments] done: segments={}, elapsed={}ms", seg_count, t0.elapsed().as_millis());
+    writer
+        .wait_merging_threads()
+        .map_err(|e| format!("等待合并失败: {}", e))?;
+    log::info!(
+        "[merge_segments] done: segments={}, elapsed={}ms",
+        seg_count,
+        t0.elapsed().as_millis()
+    );
     Ok(())
 }
 
 /// 删除单个对话的索引。
-pub fn remove_conversation(
-    index: &Index,
-    account_dir: &Path,
-    conv_id: &str,
-) -> Result<(), String> {
+pub fn remove_conversation(index: &Index, account_dir: &Path, conv_id: &str) -> Result<(), String> {
     let schema = index.schema();
     let conv_id_field = schema.get_field(F_CONV_ID).unwrap();
 

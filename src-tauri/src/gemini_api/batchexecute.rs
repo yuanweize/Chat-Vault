@@ -11,8 +11,8 @@ use std::sync::atomic::Ordering;
 
 use crate::browser_info;
 use crate::protocol::{
-    has_batchexecute_session_error, parse_batchexecute_response, ProtocolError,
-    REQUEST_RETRY_PAUSE_SECONDS, GEMINI_BASE,
+    has_batchexecute_session_error, parse_batchexecute_response, ProtocolError, GEMINI_BASE,
+    REQUEST_RETRY_PAUSE_SECONDS,
 };
 
 use super::GeminiExporter;
@@ -38,7 +38,10 @@ impl GeminiExporter {
         payload_json: &str,
         source_path: &str,
     ) -> Result<serde_json::Value, String> {
-        match self.batchexecute_once(rpcid, payload_json, source_path).await {
+        match self
+            .batchexecute_once(rpcid, payload_json, source_path)
+            .await
+        {
             Ok(data) => Ok(data),
             Err(e) => {
                 // session 过期不在此层重试，交给上层 run_with_retry 重建 exporter
@@ -49,12 +52,17 @@ impl GeminiExporter {
                 if e.contains("用户取消") {
                     return Err(e);
                 }
-                log::warn!("[batchexecute] 失败，{}s 后重试一次: {}", REQUEST_RETRY_PAUSE_SECONDS, e);
+                log::warn!(
+                    "[batchexecute] 失败，{}s 后重试一次: {}",
+                    REQUEST_RETRY_PAUSE_SECONDS,
+                    e
+                );
                 tokio::time::sleep(std::time::Duration::from_secs_f64(
                     REQUEST_RETRY_PAUSE_SECONDS,
                 ))
                 .await;
-                self.batchexecute_once(rpcid, payload_json, source_path).await
+                self.batchexecute_once(rpcid, payload_json, source_path)
+                    .await
             }
         }
     }
@@ -145,7 +153,11 @@ impl GeminiExporter {
             .map_err(|e| format!("读取 batchexecute 响应失败: {}", e))?;
 
         if !status.is_success() {
-            log::debug!("HTTP {} 响应失败, body length={}", status.as_u16(), resp_text.len());
+            log::debug!(
+                "HTTP {} 响应失败, body length={}",
+                status.as_u16(),
+                resp_text.len()
+            );
             return Err(format!("batchexecute 失败: HTTP {}", status.as_u16()));
         }
 

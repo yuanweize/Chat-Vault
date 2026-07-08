@@ -201,7 +201,11 @@ fn url_extract_re() -> &'static Regex {
 }
 
 fn is_internal_placeholder_content_url(url_text: &str) -> bool {
-    let candidate = url_text.trim().trim_end_matches(&['。', '.', ',', ';', '，', '；', '）', ')', ']', '}', '"', '\''][..]);
+    let candidate = url_text.trim().trim_end_matches(
+        &[
+            '。', '.', ',', ';', '，', '；', '）', ')', ']', '}', '"', '\'',
+        ][..],
+    );
     if !candidate.starts_with("https://") && !candidate.starts_with("http://") {
         return false;
     }
@@ -389,9 +393,7 @@ fn is_media_descriptor(item: &Value) -> bool {
 }
 
 fn media_descriptor_size_hint(item: &Value) -> i64 {
-    vget(item, 15)
-        .and_then(|v| vi64(v, 2))
-        .unwrap_or(0)
+    vget(item, 15).and_then(|v| vi64(v, 2)).unwrap_or(0)
 }
 
 fn pick_preferred_media_descriptor(items: &[&Value]) -> Option<usize> {
@@ -509,7 +511,9 @@ fn extract_ai_media_items(ai_data: &Value) -> Vec<&Value> {
 }
 
 /// 从 ai_data[12] 提取 AI 生成的音乐/视频媒体
-fn extract_generated_media(ai_data: &Value) -> (Vec<MediaFile>, Option<MusicMeta>, Option<GenMeta>) {
+fn extract_generated_media(
+    ai_data: &Value,
+) -> (Vec<MediaFile>, Option<MusicMeta>, Option<GenMeta>) {
     let mut files = Vec::new();
     let mut music_meta: Option<MusicMeta> = None;
     let mut gen_meta: Option<GenMeta> = None;
@@ -552,15 +556,13 @@ fn extract_generated_media(ai_data: &Value) -> (Vec<MediaFile>, Option<MusicMeta
 
     // Array 格式（旧格式）
     // 检测音乐块: block[6] 存在且 block[6..] 的 JSON 含 "music_gen"
-    let is_music = vlen(block) > 6
-        && block[6].is_array()
-        && {
-            let tail_json = block.as_array().unwrap()[6..]
-                .iter()
-                .filter_map(|v| serde_json::to_string(v).ok())
-                .collect::<String>();
-            tail_json.contains("music_gen")
-        };
+    let is_music = vlen(block) > 6 && block[6].is_array() && {
+        let tail_json = block.as_array().unwrap()[6..]
+            .iter()
+            .filter_map(|v| serde_json::to_string(v).ok())
+            .collect::<String>();
+        tail_json.contains("music_gen")
+    };
 
     if is_music {
         if let Some(arr) = block.as_array() {
@@ -599,7 +601,11 @@ fn extract_music_from_slots(
             let album = vstr(meta, 2).map(|s| s.to_string());
             let genre = vstr(meta, 4).map(|s| s.to_string());
             let moods = varr(meta, 5)
-                .map(|a| a.iter().filter_map(|v| v.as_str().map(|s| s.to_string())).collect())
+                .map(|a| {
+                    a.iter()
+                        .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                        .collect()
+                })
                 .unwrap_or_default();
             *music_meta = Some(MusicMeta {
                 title,
@@ -652,13 +658,11 @@ fn extract_gen_video_from_value(
                     if let Some(gen_info) = vget(group, 1) {
                         if gen_info.is_array() && vlen(gen_info) > 0 {
                             let prompt = vstr(gen_info, 0).map(|s| s.to_string());
-                            let model = vget(gen_info, 2)
-                                .and_then(|v| vstr(v, 2))
-                                .map(|s| {
-                                    // "models/veo-3.1-fast-generate-002;backend_beyond" → "veo-3.1-fast-generate-002"
-                                    let s = s.strip_prefix("models/").unwrap_or(s);
-                                    s.split(';').next().unwrap_or(s).to_string()
-                                });
+                            let model = vget(gen_info, 2).and_then(|v| vstr(v, 2)).map(|s| {
+                                // "models/veo-3.1-fast-generate-002;backend_beyond" → "veo-3.1-fast-generate-002"
+                                let s = s.strip_prefix("models/").unwrap_or(s);
+                                s.split(';').next().unwrap_or(s).to_string()
+                            });
                             *gen_meta = Some(GenMeta { model, prompt });
                         }
                     }
@@ -750,7 +754,10 @@ pub fn parse_media_item(item: &Value, role: &str) -> MediaFile {
     if let Some(res) = arr.get(17).and_then(|v| v.as_array()) {
         if res.len() >= 3 {
             if let (Some(w), Some(h)) = (res[1].as_i64(), res[2].as_i64()) {
-                media.resolution = Some(Resolution { width: w, height: h });
+                media.resolution = Some(Resolution {
+                    width: w,
+                    height: h,
+                });
             }
         }
     }
@@ -897,7 +904,8 @@ fn extract_research_progress_entries(ai_data: &Value) -> Option<Vec<ResearchProg
     // [1][4][2] = progress entries array
     let block1 = progress_arr.get(1)?.as_array()?;
     let block14 = block1.get(4)?;
-    let entries_arr = block14.as_array()
+    let entries_arr = block14
+        .as_array()
         .and_then(|a| a.get(2))
         .and_then(|v| v.as_array())?;
 
@@ -1008,9 +1016,8 @@ fn extract_canvas_list(ai_data: &Value) -> Vec<Canvas> {
                     let trimmed = s.trim();
                     if trimmed.starts_with("```") {
                         let without_first = trimmed.splitn(2, '\n').nth(1).unwrap_or(trimmed);
-                        let without_last = without_first
-                            .strip_suffix("```")
-                            .unwrap_or(without_first);
+                        let without_last =
+                            without_first.strip_suffix("```").unwrap_or(without_first);
                         without_last.trim().to_string()
                     } else {
                         trimmed.to_string()
@@ -1038,15 +1045,62 @@ fn extract_canvas_list(ai_data: &Value) -> Vec<Canvas> {
 }
 
 /// 解析单个对话轮次
+
+fn extract_turn_id_timestamp(arr: &[Value]) -> (Option<String>, Option<i64>, Option<String>) {
+    let mut turn_id = None;
+    let mut timestamp = None;
+    let mut timestamp_iso = None;
+
+    if let Some(ids) = arr.first().and_then(|v| v.as_array()) {
+        turn_id = if ids.len() > 1 {
+            ids[1].as_str().map(|s| s.to_string())
+        } else {
+            ids.first().and_then(|v| v.as_str()).map(|s| s.to_string())
+        };
+    }
+    if arr.len() > 4 {
+        if let Some(t4) = arr[4].as_array() {
+            if !t4.is_empty() {
+                if let Some(ts) = t4[0].as_i64() {
+                    timestamp = Some(ts);
+                    timestamp_iso = to_iso_utc(Some(ts));
+                }
+            }
+        }
+    }
+    (turn_id, timestamp, timestamp_iso)
+}
+
+fn extract_user_content(arr: &[Value]) -> RoleContent {
+    let mut user = RoleContent { text: String::new(), files: Vec::new() };
+    if arr.len() > 2 {
+        let content = &arr[2];
+        if let Some(msg) = vget(content, 0) {
+            if let Some(text) = vstr(msg, 0) {
+                user.text = text.to_string();
+            }
+            if let Some(m4) = vget(msg, 4) {
+                if let Some(m40) = vget(m4, 0) {
+                    if let Some(user_files) = varr(m40, 3) {
+                        for f in user_files {
+                            if f.is_array() {
+                                user.files.push(parse_media_item(f, "user"));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    user
+}
+
 pub fn parse_turn(turn: &Value) -> ParsedTurn {
     let mut result = ParsedTurn {
         turn_id: None,
         timestamp: None,
         timestamp_iso: None,
-        user: RoleContent {
-            text: String::new(),
-            files: Vec::new(),
-        },
+        user: RoleContent { text: String::new(), files: Vec::new() },
         assistant: AssistantContent {
             text: String::new(),
             thinking: String::new(),
@@ -1065,48 +1119,11 @@ pub fn parse_turn(turn: &Value) -> ParsedTurn {
         None => return result,
     };
 
-    // turn_id from turn[0]
-    if let Some(ids) = arr.first().and_then(|v| v.as_array()) {
-        result.turn_id = if ids.len() > 1 {
-            ids[1].as_str().map(|s| s.to_string())
-        } else {
-            ids.first().and_then(|v| v.as_str()).map(|s| s.to_string())
-        };
-    }
-
-    // timestamp from turn[4]
-    if arr.len() > 4 {
-        if let Some(t4) = arr[4].as_array() {
-            if !t4.is_empty() {
-                if let Some(ts) = t4[0].as_i64() {
-                    result.timestamp = Some(ts);
-                    result.timestamp_iso = to_iso_utc(Some(ts));
-                }
-            }
-        }
-    }
-
-    // user text from turn[2][0][0]
-    if arr.len() > 2 {
-        let content = &arr[2];
-        if let Some(msg) = vget(content, 0) {
-            if let Some(text) = vstr(msg, 0) {
-                result.user.text = text.to_string();
-            }
-            // user files from msg[4][0][3]
-            if let Some(m4) = vget(msg, 4) {
-                if let Some(m40) = vget(m4, 0) {
-                    if let Some(user_files) = varr(m40, 3) {
-                        for f in user_files {
-                            if f.is_array() {
-                                result.user.files.push(parse_media_item(f, "user"));
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
+    let (turn_id, ts, ts_iso) = extract_turn_id_timestamp(arr);
+    result.turn_id = turn_id;
+    result.timestamp = ts;
+    result.timestamp_iso = ts_iso;
+    result.user = extract_user_content(arr);
 
     // assistant data from turn[3]
     if arr.len() <= 3 {
@@ -1125,15 +1142,10 @@ pub fn parse_turn(turn: &Value) -> ParsedTurn {
 
     // select AI candidate
     let mut ai_data: Option<&Value> = None;
-    let selected_candidate_id = detail_arr
-        .get(3)
-        .and_then(|v| v.as_str());
+    let selected_candidate_id = detail_arr.get(3).and_then(|v| v.as_str());
 
     if let Some(candidates_arr) = detail_arr.first().and_then(|v| v.as_array()) {
-        let candidates: Vec<&Value> = candidates_arr
-            .iter()
-            .filter(|c| c.is_array())
-            .collect();
+        let candidates: Vec<&Value> = candidates_arr.iter().filter(|c| c.is_array()).collect();
 
         if let Some(sel_id) = selected_candidate_id {
             for c in &candidates {
@@ -1208,12 +1220,9 @@ pub fn parse_turn(turn: &Value) -> ParsedTurn {
 
         // Deep Research: report turn 有 ai[30]，plan turn 有 ai[12][8]["56"]
         // 两者都可能附带 ai[12][8]["58"] 进度数据（已在各自提取函数内处理）
-        result.assistant.deep_research = extract_deep_research_report(ai)
-            .or_else(|| extract_deep_research_plan(ai));
+        result.assistant.deep_research =
+            extract_deep_research_report(ai).or_else(|| extract_deep_research_plan(ai));
 
-        // Report turn 的 turn[4][0] 是 turn 创建时间，与 plan turn 几乎一致；
-        // 真正的报告完成时间在 ai[12][8]["57"][0][5]，注入到 Report 里，后续仅用于
-        // 覆盖 assistant 消息行的时间，user 消息行仍保留 turn[4][0]。
         if let Some(DeepResearch::Report { completion_ts, .. }) =
             result.assistant.deep_research.as_mut()
         {
@@ -1223,7 +1232,7 @@ pub fn parse_turn(turn: &Value) -> ParsedTurn {
         // Canvas
         result.assistant.canvas = extract_canvas_list(ai);
 
-        // Sanitize placeholder text (deep_research / canvas turn 的正文也是占位 URL)
+        // Sanitize placeholder text
         let needs_sanitize = !result.assistant.files.is_empty()
             || result.assistant.deep_research.is_some()
             || !result.assistant.canvas.is_empty();
@@ -1233,16 +1242,13 @@ pub fn parse_turn(turn: &Value) -> ParsedTurn {
             result.assistant.canvas.len(),
         );
 
-        // Canvas 交错内容块
         if !result.assistant.canvas.is_empty() {
             result.assistant.content_blocks =
                 split_text_into_content_blocks(&result.assistant.text);
         }
 
-        // Strip citation markers ([cite_start], [cite: N, ...])
         result.assistant.text = strip_citation_markers(&result.assistant.text);
 
-        // Generated media (music/video from ai_data[12])
         let (gen_files, music_meta, gen_meta) = extract_generated_media(ai);
         if !gen_files.is_empty() {
             let existing_urls: HashSet<String> = result
@@ -1272,6 +1278,7 @@ pub fn parse_turn(turn: &Value) -> ParsedTurn {
     result
 }
 
+
 // ============================================================================
 // 媒体身份键与堆叠去重
 // ============================================================================
@@ -1281,12 +1288,24 @@ type MediaIdentityKey = (String, String, String, String, String);
 fn media_identity_key(file_item: &MediaFile) -> MediaIdentityKey {
     if let Some(ref mid) = file_item.media_id {
         if !mid.is_empty() {
-            return ("media_id".into(), mid.clone(), String::new(), String::new(), String::new());
+            return (
+                "media_id".into(),
+                mid.clone(),
+                String::new(),
+                String::new(),
+                String::new(),
+            );
         }
     }
     if let Some(ref u) = file_item.url {
         if !u.is_empty() {
-            return ("url".into(), u.clone(), String::new(), String::new(), String::new());
+            return (
+                "url".into(),
+                u.clone(),
+                String::new(),
+                String::new(),
+                String::new(),
+            );
         }
     }
     (
@@ -1333,7 +1352,8 @@ pub fn normalize_turn_media_first_seen(parsed_turns: &mut [ParsedTurn]) {
             let mut turn_seen: HashSet<MediaIdentityKey> = HashSet::new();
             for f in &turn.assistant.files {
                 let key = media_identity_key(f);
-                if turn_seen.contains(&key) || seen_assistant.contains(&key)
+                if turn_seen.contains(&key)
+                    || seen_assistant.contains(&key)
                     || seen_user.contains(&key)
                 {
                     continue;
@@ -1406,7 +1426,8 @@ mod tests {
     #[test]
     fn test_sanitize_generation_placeholder_text() {
         // 普通附件占位 URL → 整行删除
-        let text = "Here is your image\nhttps://lh3.googleusercontent.com/abc_content/img.png\nEnjoy!";
+        let text =
+            "Here is your image\nhttps://lh3.googleusercontent.com/abc_content/img.png\nEnjoy!";
         let result = sanitize_generation_placeholder_text(text, true, 0);
         assert_eq!(result, "Here is your image\nEnjoy!");
 
@@ -1415,7 +1436,8 @@ mod tests {
         assert_eq!(result2, text);
 
         // Deep Research: immersive_entry_chip → 整行删除 (canvas_count=0)
-        let dr_text = "我已完成调研\nhttp://googleusercontent.com/immersive_entry_chip/0\n点击查看报告";
+        let dr_text =
+            "我已完成调研\nhttp://googleusercontent.com/immersive_entry_chip/0\n点击查看报告";
         let dr_result = sanitize_generation_placeholder_text(dr_text, true, 0);
         assert_eq!(dr_result, "我已完成调研\n点击查看报告");
 
@@ -1424,8 +1446,7 @@ mod tests {
         let canvas_result = sanitize_generation_placeholder_text(canvas_text, true, 2);
         let expected = format!(
             "介绍文字\n{}0{}\n第二段\n{}1{}\n结尾",
-            CANVAS_MARKER_PREFIX, CANVAS_MARKER_SUFFIX,
-            CANVAS_MARKER_PREFIX, CANVAS_MARKER_SUFFIX,
+            CANVAS_MARKER_PREFIX, CANVAS_MARKER_SUFFIX, CANVAS_MARKER_PREFIX, CANVAS_MARKER_SUFFIX,
         );
         assert_eq!(canvas_result, expected);
     }
@@ -1434,8 +1455,7 @@ mod tests {
     fn test_split_text_into_content_blocks() {
         let text = format!(
             "### 标题1\n描述\n{}0{}\n### 标题2\n{}1{}\n总结",
-            CANVAS_MARKER_PREFIX, CANVAS_MARKER_SUFFIX,
-            CANVAS_MARKER_PREFIX, CANVAS_MARKER_SUFFIX,
+            CANVAS_MARKER_PREFIX, CANVAS_MARKER_SUFFIX, CANVAS_MARKER_PREFIX, CANVAS_MARKER_SUFFIX,
         );
         let blocks = split_text_into_content_blocks(&text);
         assert_eq!(blocks.len(), 5);
@@ -1485,13 +1505,36 @@ mod tests {
 
     #[test]
     fn test_is_media_descriptor() {
-        let image_desc = json!([null, 1, "photo.jpg", "https://example.com/img.jpg",
-            null, null, null, null, null, null, null, "image/jpeg"]);
+        let image_desc = json!([
+            null,
+            1,
+            "photo.jpg",
+            "https://example.com/img.jpg",
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            "image/jpeg"
+        ]);
         assert!(is_media_descriptor(&image_desc));
 
-        let video_desc = json!([null, 2, "vid.mp4", null, null, null, null,
+        let video_desc = json!([
+            null,
+            2,
+            "vid.mp4",
+            null,
+            null,
+            null,
+            null,
             ["https://thumb.com/t.jpg", "https://example.com/v.mp4"],
-            null, null, null, "video/mp4"]);
+            null,
+            null,
+            null,
+            "video/mp4"
+        ]);
         assert!(is_media_descriptor(&video_desc));
 
         let not_media = json!([null, 3, "file.txt"]);
@@ -1500,8 +1543,20 @@ mod tests {
 
     #[test]
     fn test_parse_media_item_image() {
-        let item = json!([null, 1, "photo.jpg", "https://example.com/img.jpg",
-            null, null, null, null, null, null, null, "image/jpeg"]);
+        let item = json!([
+            null,
+            1,
+            "photo.jpg",
+            "https://example.com/img.jpg",
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            "image/jpeg"
+        ]);
         let parsed = parse_media_item(&item, "assistant");
         assert_eq!(parsed.media_type, "image");
         assert_eq!(parsed.url.as_deref(), Some("https://example.com/img.jpg"));
@@ -1511,9 +1566,20 @@ mod tests {
 
     #[test]
     fn test_parse_media_item_video() {
-        let item = json!([null, 2, "vid.mp4", null, null, null, null,
+        let item = json!([
+            null,
+            2,
+            "vid.mp4",
+            null,
+            null,
+            null,
+            null,
             ["https://thumb.com/t.jpg", "https://example.com/v.mp4"],
-            null, null, null, "video/mp4"]);
+            null,
+            null,
+            null,
+            "video/mp4"
+        ]);
         let parsed = parse_media_item(&item, "user");
         assert_eq!(parsed.media_type, "video");
         assert_eq!(parsed.url.as_deref(), Some("https://example.com/v.mp4"));
@@ -1521,9 +1587,23 @@ mod tests {
 
     #[test]
     fn test_parse_media_item_duration() {
-        let item = json!([null, 2, "vid.mp4", null, null, null, null,
-            ["https://example.com/v.mp4"], null, null, null, "video/mp4",
-            null, null, [[30, 772244000]]]);
+        let item = json!([
+            null,
+            2,
+            "vid.mp4",
+            null,
+            null,
+            null,
+            null,
+            ["https://example.com/v.mp4"],
+            null,
+            null,
+            null,
+            "video/mp4",
+            null,
+            null,
+            [[30, 772244000]]
+        ]);
         let parsed = parse_media_item(&item, "assistant");
         assert!(parsed.duration.is_some());
         let dur = parsed.duration.unwrap();
@@ -1533,21 +1613,28 @@ mod tests {
     #[test]
     fn test_parse_turn_basic() {
         let turn = json!([
-            ["conv_id", "turn_abc"],           // [0] ids
-            null,                               // [1]
-            [[                                  // [2] content
-                "Hello world",                  // [2][0][0] user text
-                null, null, null, null
+            ["conv_id", "turn_abc"], // [0] ids
+            null,                    // [1]
+            [[
+                // [2] content
+                "Hello world", // [2][0][0] user text
+                null,
+                null,
+                null,
+                null
             ]],
-            [                                   // [3] detail
-                [[                              // [3][0] candidates
-                    "cand_1",                   // [3][0][0][0] candidate id
-                    ["AI response text"],       // [3][0][0][1] text
+            [
+                // [3] detail
+                [[
+                    // [3][0] candidates
+                    "cand_1",             // [3][0][0][0] candidate id
+                    ["AI response text"], // [3][0][0][1] text
                 ]],
-                null, null,
-                "cand_1",                       // [3][3] selected candidate id
+                null,
+                null,
+                "cand_1", // [3][3] selected candidate id
             ],
-            [1700000000]                        // [4] timestamp
+            [1700000000] // [4] timestamp
         ]);
         let parsed = parse_turn(&turn);
         assert_eq!(parsed.turn_id.as_deref(), Some("turn_abc"));
@@ -1563,25 +1650,26 @@ mod tests {
                 turn_id: Some("t1".into()),
                 timestamp: Some(100),
                 timestamp_iso: None,
-                user: RoleContent { text: String::new(), files: Vec::new() },
+                user: RoleContent {
+                    text: String::new(),
+                    files: Vec::new(),
+                },
                 assistant: AssistantContent {
                     text: String::new(),
                     thinking: String::new(),
                     model: String::new(),
-                    files: vec![
-                        MediaFile {
-                            role: "assistant".into(),
-                            media_type: "image".into(),
-                            filename: None,
-                            mime: None,
-                            url: Some("https://example.com/a.jpg".into()),
-                            thumbnail_url: None,
-                            duration: None,
-                            resolution: None,
-                            media_id: None,
-                            preview_media_id: None,
-                        },
-                    ],
+                    files: vec![MediaFile {
+                        role: "assistant".into(),
+                        media_type: "image".into(),
+                        filename: None,
+                        mime: None,
+                        url: Some("https://example.com/a.jpg".into()),
+                        thumbnail_url: None,
+                        duration: None,
+                        resolution: None,
+                        media_id: None,
+                        preview_media_id: None,
+                    }],
                     music_meta: None,
                     gen_meta: None,
                     deep_research: None,
@@ -1593,7 +1681,10 @@ mod tests {
                 turn_id: Some("t2".into()),
                 timestamp: Some(200),
                 timestamp_iso: None,
-                user: RoleContent { text: String::new(), files: Vec::new() },
+                user: RoleContent {
+                    text: String::new(),
+                    files: Vec::new(),
+                },
                 assistant: AssistantContent {
                     text: String::new(),
                     thinking: String::new(),
@@ -1656,19 +1747,84 @@ mod tests {
         let mut ai_data = vec![Value::Null; 38];
 
         let progress_entries = json!([
-            [],  // 空分隔符
-            [null, null, null, null, null, ["分析网站数据", "正在收集小龙虾养殖相关信息", 0]],
-            [null, null, null, null, null, ["评估搜索结果", "已找到3个相关来源", 0]],
-            [null, null, null, null, null, ["规划下一步", "需要更多学术资料", 0]],
-            [null, null, null, null, [1, "Researching websites...", ["https://favicon.com/f.ico", "https://example.com/article", "小龙虾养殖指南"], [1700000000, 0]]],
-            [null, null, null, null, [1, "Researching uploaded files...", null, [1700000001, 0], [null, 11, "克氏原螯虾.pdf"]]],
-            [],  // 空分隔符
-            [null, ["google", ["", null, "Google Search", "https://icon.com/g.png", "search"], 1]]
+            [], // 空分隔符
+            [
+                null,
+                null,
+                null,
+                null,
+                null,
+                ["分析网站数据", "正在收集小龙虾养殖相关信息", 0]
+            ],
+            [
+                null,
+                null,
+                null,
+                null,
+                null,
+                ["评估搜索结果", "已找到3个相关来源", 0]
+            ],
+            [
+                null,
+                null,
+                null,
+                null,
+                null,
+                ["规划下一步", "需要更多学术资料", 0]
+            ],
+            [
+                null,
+                null,
+                null,
+                null,
+                [
+                    1,
+                    "Researching websites...",
+                    [
+                        "https://favicon.com/f.ico",
+                        "https://example.com/article",
+                        "小龙虾养殖指南"
+                    ],
+                    [1700000000, 0]
+                ]
+            ],
+            [
+                null,
+                null,
+                null,
+                null,
+                [
+                    1,
+                    "Researching uploaded files...",
+                    null,
+                    [1700000001, 0],
+                    [null, 11, "克氏原螯虾.pdf"]
+                ]
+            ],
+            [], // 空分隔符
+            [
+                null,
+                [
+                    "google",
+                    [
+                        "",
+                        null,
+                        "Google Search",
+                        "https://icon.com/g.png",
+                        "search"
+                    ],
+                    1
+                ]
+            ]
         ]);
 
         let progress_58 = json!([
             "7f670d97-f2a8-42af-abe3-b82b8291b739",
-            [null, null, null, null,
+            [
+                null,
+                null,
+                null,
+                null,
                 ["小龙虾养殖技术研究", null, progress_entries]
             ]
         ]);
@@ -1691,7 +1847,10 @@ mod tests {
         assert_eq!(entries[0].round, Some(0));
 
         assert_eq!(entries[3].entry_type, "web_search");
-        assert_eq!(entries[3].url.as_deref(), Some("https://example.com/article"));
+        assert_eq!(
+            entries[3].url.as_deref(),
+            Some("https://example.com/article")
+        );
         assert_eq!(entries[3].page_title.as_deref(), Some("小龙虾养殖指南"));
 
         assert_eq!(entries[4].entry_type, "file_search");
@@ -1717,7 +1876,11 @@ mod tests {
         // plan turn 只有 "56"，"58" 在 plan 上是空壳（真实数据验证）
         let plan_56 = json!([
             "研究标题",
-            [[1, "研究网站", "搜索相关资料"], [2, "分析结果"], [3, "生成报告"]],
+            [
+                [1, "研究网站", "搜索相关资料"],
+                [2, "分析结果"],
+                [3, "生成报告"]
+            ],
             "几分钟"
         ]);
 
@@ -1736,17 +1899,18 @@ mod tests {
             ["conv_id", "turn_plan"],
             null,
             [["用户提问", null, null, null, null]],
-            [
-                [ai_data],
-                null, null,
-                "cand_1",
-            ],
+            [[ai_data], null, null, "cand_1",],
             [1700000000]
         ]);
 
         let parsed = parse_turn(&turn);
         match parsed.assistant.deep_research.unwrap() {
-            DeepResearch::Plan { title, steps, estimated_time, .. } => {
+            DeepResearch::Plan {
+                title,
+                steps,
+                estimated_time,
+                ..
+            } => {
                 assert_eq!(title, "研究标题");
                 assert_eq!(steps.len(), 3);
                 assert_eq!(steps[0].name, "研究网站");
@@ -1805,7 +1969,9 @@ mod tests {
         assert_eq!(parsed.timestamp, Some(1700000000));
         // 完成时间挂在 Report 里，供 storage 单独覆盖 assistant 行
         match parsed.assistant.deep_research.as_ref().unwrap() {
-            DeepResearch::Report { completion_ts: c, .. } => {
+            DeepResearch::Report {
+                completion_ts: c, ..
+            } => {
                 assert_eq!(*c, Some(completion_ts));
             }
             _ => panic!("应为 Report"),
@@ -1839,7 +2005,9 @@ mod tests {
         let parsed = parse_turn(&turn);
         assert_eq!(parsed.timestamp, Some(1700000000));
         match parsed.assistant.deep_research.as_ref().unwrap() {
-            DeepResearch::Report { completion_ts: c, .. } => assert!(c.is_none()),
+            DeepResearch::Report {
+                completion_ts: c, ..
+            } => assert!(c.is_none()),
             _ => panic!("应为 Report"),
         }
     }
@@ -1851,17 +2019,15 @@ mod tests {
             report_text: "# 报告内容".to_string(),
             research_id: None,
             document_id: None,
-            progress: Some(vec![
-                ResearchProgressEntry {
-                    entry_type: "thinking".to_string(),
-                    title: Some("思考".to_string()),
-                    description: Some("描述".to_string()),
-                    round: Some(0),
-                    url: None,
-                    page_title: None,
-                    filename: None,
-                },
-            ]),
+            progress: Some(vec![ResearchProgressEntry {
+                entry_type: "thinking".to_string(),
+                title: Some("思考".to_string()),
+                description: Some("描述".to_string()),
+                round: Some(0),
+                url: None,
+                page_title: None,
+                filename: None,
+            }]),
             completion_ts: None,
         };
 

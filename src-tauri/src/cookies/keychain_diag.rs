@@ -34,7 +34,15 @@ pub fn check_keychain_access(service: &str, account: &str) -> (bool, String) {
     }
 
     let result = std::process::Command::new(security_bin)
-        .args(["-q", "find-generic-password", "-w", "-a", account, "-s", service])
+        .args([
+            "-q",
+            "find-generic-password",
+            "-w",
+            "-a",
+            account,
+            "-s",
+            service,
+        ])
         .output();
 
     match result {
@@ -62,7 +70,9 @@ pub fn check_keychain_access(_service: &str, _account: &str) -> (bool, String) {
 
 /// 对指定浏览器执行 Keychain 诊断
 pub fn diagnose_browser_keychain(browser_name: &str) -> Option<KeychainDiagResult> {
-    let (_, service, account) = KEYCHAIN_MAP.iter().find(|(name, _, _)| *name == browser_name)?;
+    let (_, service, account) = KEYCHAIN_MAP
+        .iter()
+        .find(|(name, _, _)| *name == browser_name)?;
 
     let (accessible, detail) = check_keychain_access(service, account);
 
@@ -161,9 +171,13 @@ pub fn run_full_diagnostics() -> CookieDiagnosticReport {
     let summary = if !has_files && !permission_issues.is_empty() {
         "未找到浏览器 cookie 文件，存在权限问题。请在 系统设置 → 隐私与安全性 → 完全磁盘访问 中授权本应用。".to_string()
     } else if !has_files {
-        "未找到已知浏览器的 cookie 文件。请确认已安装 Chrome/Chromium/Brave/Edge 并登录过 Google。".to_string()
+        "未找到已知浏览器的 cookie 文件。请确认已安装 Chrome/Chromium/Brave/Edge 并登录过 Google。"
+            .to_string()
     } else if !keychain_ok && !keychain_diagnostics.is_empty() {
-        let browsers: Vec<String> = keychain_diagnostics.iter().map(|d| d.browser.clone()).collect();
+        let browsers: Vec<String> = keychain_diagnostics
+            .iter()
+            .map(|d| d.browser.clone())
+            .collect();
         format!(
             "找到 cookie 文件但无法读取 Keychain 密钥（{}）。详见 keychain_diagnostics。",
             browsers.join(", ")

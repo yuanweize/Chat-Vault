@@ -16,10 +16,7 @@ pub struct AccountMapping {
 
 fn post_message_re() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
-    RE.get_or_init(|| {
-        Regex::new(r"(?s)postMessage\('(.+?)'\s*,\s*'[^']*'\)")
-            .unwrap()
-    })
+    RE.get_or_init(|| Regex::new(r"(?s)postMessage\('(.+?)'\s*,\s*'[^']*'\)").unwrap())
 }
 
 /// 构建 Cookie 请求头值
@@ -178,7 +175,11 @@ pub async fn discover_email_authuser_mapping(
         .await
         .map_err(|e| format!("读取 ListAccounts 响应失败: {}", e))?;
 
-    log::info!("ListAccounts HTTP {}, body length={}", status.as_u16(), body.len());
+    log::info!(
+        "ListAccounts HTTP {}, body length={}",
+        status.as_u16(),
+        body.len()
+    );
 
     parse_list_accounts_response(&body)
 }
@@ -191,7 +192,10 @@ fn parse_list_accounts_response(body: &str) -> Result<Vec<AccountMapping>, Strin
             let payload_raw = m.as_str();
             let payload_unescaped = payload_raw.replace("\\/", "/");
             let payload = decode_unicode_escapes(&payload_unescaped);
-            log::info!("ListAccounts postMessage payload matched, length={}", payload.len());
+            log::info!(
+                "ListAccounts postMessage payload matched, length={}",
+                payload.len()
+            );
             return parse_list_accounts_json(&payload);
         }
     }
@@ -202,7 +206,10 @@ fn parse_list_accounts_response(body: &str) -> Result<Vec<AccountMapping>, Strin
         if let Some(rest) = trimmed.strip_prefix(prefix) {
             let rest = rest.trim();
             if rest.starts_with('[') {
-                log::info!("ListAccounts JSON (stripped prefix) matched, length={}", rest.len());
+                log::info!(
+                    "ListAccounts JSON (stripped prefix) matched, length={}",
+                    rest.len()
+                );
                 return parse_list_accounts_json(rest);
             }
         }
@@ -212,7 +219,10 @@ fn parse_list_accounts_response(body: &str) -> Result<Vec<AccountMapping>, Strin
         return parse_list_accounts_json(trimmed);
     }
 
-    log::warn!("ListAccounts 响应无法匹配任何格式，body length={}", body.len());
+    log::warn!(
+        "ListAccounts 响应无法匹配任何格式，body length={}",
+        body.len()
+    );
     Err(format!(
         "ListAccounts 响应格式无法解析（body length={}）",
         body.len()
@@ -288,10 +298,7 @@ mod tests {
     fn test_decode_unicode_escapes() {
         assert_eq!(decode_unicode_escapes(r"hello\u0020world"), "hello world");
         assert_eq!(decode_unicode_escapes(r"a\/b"), "a/b");
-        assert_eq!(
-            decode_unicode_escapes(r"\u4f60\u597d"),
-            "你好"
-        );
+        assert_eq!(decode_unicode_escapes(r"\u4f60\u597d"), "你好");
         // \xNN hex escapes (Google ListAccounts format)
         assert_eq!(decode_unicode_escapes(r"\x5b\x22hi\x22\x5d"), r#"["hi"]"#);
         assert_eq!(decode_unicode_escapes(r"\x41\x42"), "AB");
@@ -333,7 +340,11 @@ mod tests {
         assert_eq!(result[0].authuser.as_deref(), Some("0"));
         assert_eq!(result[1].email, "bob@gmail.com");
         assert_eq!(result[1].authuser.as_deref(), Some("1"));
-        assert!(result[1].redirect_url.as_deref().unwrap().contains("/u/1/app"));
+        assert!(result[1]
+            .redirect_url
+            .as_deref()
+            .unwrap()
+            .contains("/u/1/app"));
     }
 
     #[test]

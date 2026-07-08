@@ -256,7 +256,9 @@ fn dpapi_decrypt_bytes(data: &[u8]) -> Result<Vec<u8>> {
                 extern "system" {
                     fn LocalFree(hmem: *mut core::ffi::c_void) -> *mut core::ffi::c_void;
                 }
-                unsafe { LocalFree(self.0 as _); }
+                unsafe {
+                    LocalFree(self.0 as _);
+                }
             }
         }
     }

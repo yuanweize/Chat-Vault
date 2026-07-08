@@ -7,6 +7,7 @@ import rehypeKatex from "rehype-katex";
 import rehypeRaw from "rehype-raw";
 import "katex/dist/katex.min.css";
 import { Virtuoso, VirtuosoHandle } from "react-virtuoso";
+import { useTranslation } from "react-i18next";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { openUrl, openPath } from "@tauri-apps/plugin-opener";
 import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
@@ -479,9 +480,7 @@ function ConversationTimeline({ messages, scrollerEl, visibleRange, onJumpTo }: 
                       height: dotSize,
                       borderRadius: "50%",
                       background: isActive ? "#0071e3" : dotColor,
-                      boxShadow: isActive
-                        ? "0 0 0 2.5px #0071e340, 0 0 8px #0071e360"
-                        : "none",
+                      border: isActive ? `1px solid ${t.textSub}` : "none",
                       transition:
                         "width 0.15s ease, height 0.15s ease, background 0.15s ease, box-shadow 0.15s ease, transform 0.15s ease",
                       flexShrink: 0,
@@ -512,20 +511,14 @@ function ConversationTimeline({ messages, scrollerEl, visibleRange, onJumpTo }: 
             zIndex: 1000,
             maxWidth: 240,
             pointerEvents: "none",
-            background: t.isDark
-              ? "rgba(20,23,30,0.92)"
-              : "rgba(255,255,255,0.94)",
-            backdropFilter: "blur(18px) saturate(120%)",
-            WebkitBackdropFilter: "blur(18px) saturate(120%)",
+            background: t.isDark ? "rgba(20,23,30,0.95)" : "rgba(255,255,255,0.97)",
             borderRadius: 10,
-            border: t.isDark
-              ? "1px solid rgba(255,255,255,0.13)"
-              : "1px solid rgba(0,0,0,0.09)",
+
             padding: "9px 13px",
             fontSize: 12.5,
             lineHeight: 1.55,
             color: t.text,
-            boxShadow: "0 6px 24px rgba(0,0,0,0.22)",
+            border: `2px solid ${t.border}`,
             wordBreak: "break-word",
             whiteSpace: "pre-wrap",
             overflow: "hidden",
@@ -673,6 +666,7 @@ interface ChatViewProps {
 
 export function ChatView({ conversation, accountId, mediaDir, mediaVersion = 0, scrollToMessageId, onScrolledToMessage }: ChatViewProps) {
   const t = useTheme();
+  const { t: tI18n } = useTranslation();
   const virtuosoRef = useRef<VirtuosoHandle>(null);
   const [scrollerEl, setScrollerEl] = useState<HTMLElement | null>(null);
   const [visibleRange, setVisibleRange] = useState({ startIndex: 0, endIndex: 0 });
@@ -734,8 +728,8 @@ export function ChatView({ conversation, accountId, mediaDir, mediaVersion = 0, 
       <div style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", background: "transparent" }}>
         <div style={{ textAlign: "center", color: t.textMuted }}>
           <div style={{ fontSize: 44, marginBottom: 10 }}>💬</div>
-          <div style={{ fontSize: 15, fontWeight: 600, color: t.text, marginBottom: 5 }}>选择一个对话</div>
-          <div style={{ fontSize: 13 }}>从左侧列表中选择对话查看内容</div>
+          <div style={{ fontSize: 15, fontWeight: 600, color: t.text, marginBottom: 5 }}>{tI18n("chatview.selectConversation", "选择一个对话")}</div>
+          <div style={{ fontSize: 13 }}>{tI18n("chatview.selectPrompt", "从左侧列表中选择对话查看内容")}</div>
         </div>
       </div>
     );
@@ -760,7 +754,7 @@ export function ChatView({ conversation, accountId, mediaDir, mediaVersion = 0, 
       )}
       {(() => {
         return visibleMessages.length === 0 ? (
-          <div style={{ textAlign: "center", color: t.textMuted, fontSize: 13, marginTop: 60 }}>暂无消息记录</div>
+          <div style={{ textAlign: "center", color: t.textMuted, fontSize: 13, marginTop: 60 }}>{tI18n("chatview.noMessages", "暂无消息记录")}</div>
         ) : (
           // position:relative so the absolutely-positioned timeline bar can anchor to it
           <div style={{ flex: 1, position: "relative", overflow: "hidden" }}>
@@ -818,6 +812,8 @@ function AttachmentStrip({
   cacheKey: string;
   alignRight: boolean;
 }) {
+  const t = useTheme();
+  const { t: tI18n } = useTranslation();
   const [lightboxIdx, setLightboxIdx] = useState<number | null>(null);
   const [filePreviewIdx, setFilePreviewIdx] = useState<number | null>(null);
   const failedAttachments = attachments.filter((a) => a.downloadFailed);
@@ -887,7 +883,7 @@ function AttachmentStrip({
             textAlign: alignRight ? "right" : "left",
           }}
         >
-          {failedAttachments.length} 个附件下载失败，点击同步可重试
+          {tI18n("chatview.failedDownloads", { count: failedAttachments.length, defaultValue: `${failedAttachments.length} 个附件下载失败，点击同步可重试` })}
         </div>
       )}
       {/* Media thumbnails */}
@@ -908,7 +904,7 @@ function AttachmentStrip({
               <div
                 key={i}
                 onClick={() => setLightboxIdx(i)}
-                style={{ width: 160, height: 110, borderRadius: 14, overflow: "hidden", cursor: "pointer", flexShrink: 0, background: "linear-gradient(135deg, #1a1a2e 0%, #16213e 100%)", boxShadow: "0 2px 8px rgba(0,0,0,0.3)", position: "relative", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 6 }}
+                style={{ width: 160, height: 110, borderRadius: 8, overflow: "hidden", cursor: "pointer", flexShrink: 0, background: t.aiBubbleBg, border: `2px solid ${t.border}`, position: "relative", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 6 }}
               >
                 <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,0.7)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
                   <path d="M9 18V5l12-2v13" />
@@ -924,7 +920,7 @@ function AttachmentStrip({
               <div
                 key={i}
                 onClick={() => setLightboxIdx(i)}
-                style={{ width: 160, height: 110, borderRadius: 14, overflow: "hidden", cursor: "pointer", flexShrink: 0, background: "#111", boxShadow: "0 2px 8px rgba(0,0,0,0.3)", position: "relative" }}
+                style={{ width: 160, height: 110, borderRadius: 8, overflow: "hidden", cursor: "pointer", flexShrink: 0, background: "#111", border: `2px solid ${t.border}`, position: "relative" }}
               >
                 <VideoThumbnail videoUrl={url} />
                 <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", background: "rgba(0,0,0,0.35)" }}>
@@ -954,7 +950,7 @@ function AttachmentStrip({
                 onClick={isTextFile ? () => setFilePreviewIdx(i) : undefined}
                 style={{
                   width: 160, height: 110, borderRadius: 14, overflow: "hidden", flexShrink: 0,
-                  background: "#1a1a2e", boxShadow: "0 2px 8px rgba(0,0,0,0.3)",
+                  background: t.aiBubbleBg, border: `2px solid ${t.border}`,
                   display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
                   gap: 6, padding: "8px 10px",
                   cursor: isTextFile ? "pointer" : "default",
@@ -1043,7 +1039,7 @@ function ImageThumbnail({
         cursor: "pointer",
         flexShrink: 0,
         background: t.isDark ? "#1a1a1c" : "#d9d9dc",
-        boxShadow: "0 2px 8px rgba(0,0,0,0.25)",
+        border: `2px solid ${t.border}`,
         position: "relative",
       }}
     >
@@ -1195,6 +1191,7 @@ function FilePreviewModal({
   mediaDir?: string;
   onClose: () => void;
 }) {
+  const { t: tI18n } = useTranslation();
   const [content, setContent] = useState<string | null>(null);
   const [truncated, setTruncated] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -1252,9 +1249,9 @@ function FilePreviewModal({
         {/* Content */}
         <div style={{ flex: 1, overflow: "auto", padding: "16px 20px" }}>
           {error ? (
-            <div style={{ color: "#f87171", fontSize: 13 }}>读取失败: {error}</div>
+            <div style={{ color: "#f87171", fontSize: 13 }}>{tI18n("chatview.readFailed", { error })}</div>
           ) : content === null ? (
-            <div style={{ color: "rgba(255,255,255,0.4)", fontSize: 13 }}>加载中...</div>
+            <div style={{ color: "rgba(255,255,255,0.4)", fontSize: 13 }}>{tI18n("chatview.loading", "加载中...")}</div>
           ) : (
             <>
               <pre style={{
@@ -1266,7 +1263,7 @@ function FilePreviewModal({
               </pre>
               {truncated && (
                 <div style={{ marginTop: 12, padding: "8px 0", borderTop: "1px solid rgba(255,255,255,0.08)", color: "rgba(255,255,255,0.4)", fontSize: 11, textAlign: "center" }}>
-                  文件内容过长，仅展示前 128 KB
+                  {tI18n("chatview.fileTooLong", "文件内容过长，仅展示前 128 KB")}
                 </div>
               )}
             </>
@@ -1441,7 +1438,7 @@ function aiShellStyle(t: ReturnType<typeof useTheme>): React.CSSProperties {
   return {
     background: t.aiBubbleBg,
     borderRadius: "18px 18px 18px 6px",
-    boxShadow: t.isDark ? "0 1px 3px rgba(0,0,0,0.3)" : "0 1px 3px rgba(0,0,0,0.07)",
+    border: `2px solid ${t.border}`,
     overflow: "hidden",
   };
 }
@@ -1494,6 +1491,7 @@ function CanvasBubble({
   inline?: boolean;
 }) {
   const t = useTheme();
+  const { t: tI18n } = useTranslation();
   const [hovered, setHovered] = useState(false);
   const absPath = mediaDir && canvas.content_media_id ? `${mediaDir}/${canvas.content_media_id}` : "";
   const disabled = !absPath;
@@ -1526,7 +1524,7 @@ function CanvasBubble({
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
       disabled={disabled}
-      title={disabled ? "media 文件缺失" : `在默认浏览器中打开 ${canvas.filename}`}
+      title={disabled ? tI18n("chatview.mediaMissing", "media 文件缺失") : tI18n("chatview.openInBrowser", { filename: canvas.filename })}
       style={{
         display: "flex",
         alignItems: "center",
@@ -1593,6 +1591,7 @@ function ResearchPlanBubble({
   leadingText?: string;
 }) {
   const t = useTheme();
+  const { t: tI18n } = useTranslation();
   const steps = plan.steps ?? [];
   const railColor = t.isDark ? "rgba(255,255,255,0.12)" : "rgba(0,0,0,0.08)";
   const accent = t.isDark ? ACCENT_BLUE_DARK : ACCENT_BLUE;
@@ -1623,7 +1622,7 @@ function ResearchPlanBubble({
           textTransform: "uppercase",
         }}>
           <SparkIcon color={accent} size={10} />
-          研究计划
+          {tI18n("chatview.researchPlan", "研究计划")}
         </div>
         {plan.title && (
           <div style={{ fontSize: 13.5, fontWeight: 600, color: t.text, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
@@ -1709,6 +1708,7 @@ function ResearchReportBubble({
   onOpenResearch?: (state: ResearchModalState) => void;
 }) {
   const t = useTheme();
+  const { t: tI18n } = useTranslation();
   const [progressHovered, setProgressHovered] = useState(false);
   const [reportHovered, setReportHovered] = useState(false);
   const accent = t.isDark ? ACCENT_BLUE_DARK : ACCENT_BLUE;
@@ -1738,7 +1738,7 @@ function ResearchReportBubble({
     onOpenResearch({
       accountId,
       mediaDir,
-      title: report.title || "研究报告",
+      title: report.title || tI18n("chatview.researchReport", "研究报告"),
       reportMediaId: report.report_media_id,
       progressMediaId: report.progress_media_id,
       charCount: report.char_count,
@@ -1825,14 +1825,14 @@ function ResearchReportBubble({
       )}
       {!progressDisabled && row({
         icon: <SearchIcon color={accent} />,
-        label: "调研过程",
+        label: tI18n("chatview.researchProcess", "调研过程"),
         main: progressMeta,
         meta: progressBits.length === 2 ? `共 ${entryCount} 条记录` : "",
         hovered: progressHovered,
         setHovered: setProgressHovered,
         disabled: !accountId,
         onClick: () => openResearch("progress"),
-        title: accountId ? "查看调研过程" : "账号信息缺失",
+        title: accountId ? tI18n("chatview.viewProcess", "查看调研过程") : tI18n("chatview.missingAccountInfo", "账号信息缺失"),
       })}
       {row({
         icon: <DocIcon color={accent} />,
@@ -1916,10 +1916,11 @@ function MessageBubble({
             color: isUser ? "#fff" : t.text,
             fontSize: 14,
             lineHeight: 1.55,
-            boxShadow: isHighlighted
-              ? (isUser ? "0 0 0 2px rgba(0,113,227,0.8), 0 0 16px 4px rgba(0,113,227,0.5)" : t.isDark ? "0 0 0 2px rgba(99,179,255,0.7), 0 0 16px 4px rgba(99,179,255,0.35)" : "0 0 0 2px rgba(0,113,227,0.6), 0 0 16px 4px rgba(0,113,227,0.25)")
-              : isUser ? "0 2px 8px rgba(0,113,227,0.22)" : t.isDark ? "0 1px 3px rgba(0,0,0,0.3)" : "0 1px 3px rgba(0,0,0,0.07)",
-            transition: "box-shadow 0.3s ease",
+            border: isHighlighted
+              ? `2px solid #0071e3`
+              : isUser ? "none" : `2px solid ${t.border}`,
+            boxShadow: "none",
+            transition: "border 0.3s ease",
             wordBreak: "break-word",
           }}>
             {isUser ? (

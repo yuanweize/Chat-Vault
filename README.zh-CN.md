@@ -1,120 +1,102 @@
 <div align="center">
 
-<img src="src-tauri/icons/128x128.png" width="120" style="border-radius:20px"/>
+<img src="src-tauri/icons/128x128.png" width="120" style="border-radius:22px; box-shadow: 0 8px 24px rgba(0,0,0,0.15); margin-bottom: 20px"/>
 
-# Gemini Collector
+# Chat Vault
 
-**把你的 Gemini 对话与所有 AI 生成内容完整保存到本地**
+**你的 Google Gemini 本地备份与管理终极金库**
 
-macOS & Windows 原生应用 · 支持多账号 · 亮色 / 暗色主题
+macOS & Windows 原生桌面端 · 无感后台同步 · 密码锁保护 · 时间轴导航 · 多格式高级导出
 
 [**English**](./README.md)
 
-![GitHub Release](https://img.shields.io/github/v/release/FirenzeLor/gemini-collector?color=blue)
-
-![Last Commit](https://img.shields.io/github/last-commit/FirenzeLor/gemini-collector) ![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)
+![GitHub Release](https://img.shields.io/github/v/release/yuanweize/Chat-Vault?color=0071e3&style=for-the-badge)
+![Platform](https://img.shields.io/badge/Platform-macOS%20%7C%20Windows-lightgrey?style=for-the-badge)
+![License](https://img.shields.io/badge/License-AGPL%203.0-green?style=for-the-badge)
 
 </div>
 
 ---
 
-## 界面预览
+## 📸 界面预览
+
+> **✨ v3.0.0 重大更新**: 我们对 UI 进行了全面扁平化 (Flat Design) 重构，去除了所有厚重的毛玻璃效果，界面更加干净清爽。同时，底层架构也经过了深度优化重构，现在即使面对成百上千张的深度研究报告 (Deep Research) 和 Canvas 生成内容，UI 也绝不会卡顿假死。
 
 <div align="center">
 
-| 默认主题 | 夜间主题 |
+| 浅色模式 | 深色模式 |
 |:---:|:---:|
-| <img src=".github/images/account-picker-light.png" width="420" alt="Google Gemini multi-account picker desktop app light theme" title="默认主题" /> | <img src=".github/images/account-picker-dark.png" width="420" alt="Google Gemini multi-account picker desktop app dark theme" title="夜间主题" /> |
+| <img src=".github/images/account-picker-light.png" width="420" alt="多账号选择浅色" title="浅色模式" /> | <img src=".github/images/account-picker-dark.png" width="420" alt="多账号选择深色" title="深色模式" /> |
 
-| 对话浏览 | 多媒体消息 |
+| 聊天视图 | 媒体文件 |
 |:---:|:---:|
-| <img src=".github/images/chat-main.png" width="420" alt="Google Gemini local chat history viewer and backup desktop interface" title="对话浏览" /> | <img src=".github/images/chat-media.png" width="420" alt="Downloading and viewing Gemini AI-generated images and media messages locally" title="多媒体消息" /> |
+| <img src=".github/images/chat-main.png" width="420" alt="聊天视图" title="聊天视图" /> | <img src=".github/images/chat-media.png" width="420" alt="媒体文件" title="媒体文件" /> |
 
-| 对话导览 | 导出数据 |
+| 会话列表 | 导出对话 |
 |:---:|:---:|
-| <img src=".github/images/chat-conversation.png" width="420" alt="Google Gemini conversation list sync and local backup management" title="对话导览" /> | <img src=".github/images/export-dialog.png" width="420" alt="Exporting Google Gemini conversations to local Markdown and JSON formats" title="导出数据" /> |
-
-| 深度调研 | Canvas 文件 |
-|:---:|:---:|
-| <img src=".github/images/deep-research-chat.png" width="420" alt="Gemini 深度调研对话，显示调研轮数与来源数量" title="深度调研" /> | <img src=".github/images/canvas-chat.png" width="420" alt="对话中展示多个 AI 生成的 Canvas 文件" title="Canvas 文件" /> |
-
-| 调研过程 | 报告详情 |
-|:---:|:---:|
-| <img src=".github/images/deep-research-progress.png" width="420" alt="深度调研过程时间线，含轮次、思考步骤与搜索来源" title="调研过程" /> | <img src=".github/images/deep-research-report.png" width="420" alt="深度调研报告详情，带目录导航" title="报告详情" /> |
+| <img src=".github/images/chat-conversation.png" width="420" alt="会话列表" title="会话列表" /> | <img src=".github/images/export-dialog.png" width="420" alt="导出对话" title="导出对话" /> |
 
 </div>
 
 ---
 
-## 功能特色
+## ✨ 核心特性 (Chat-Vault 独占升级)
 
-**零操作，立刻同步**
-- **macOS**：打开 App 即可看到本机 Chrome 已登录的所有 Gemini 账号，一键同步，无需任何配置
-- **Windows**：首次打开时通过内置浏览器登录 Google 账号，登录后自动识别并同步
-- 多账号同时在线，独立管理，增量更新，断点续传
+我们在原版 `gemini-collector` 的优秀基础上进行了深度重构，将其打造成了一个真正可“无人值守”的数据金库：
 
-**全量内容归档**
-- 同步所有对话文本，完整保留上下文
-- 用户上传的附件一并同步到本地
-- AI 生成的图片、音乐、视频、报告等内容同步保存，不遗漏任何素材
+- 🛡️ **金库级安全加密**：支持设置启动密码锁，并带有自动锁屏机制（1分钟、5分钟等），守护你的本地 AI 对话隐私。
+- 🥷 **无感后台静默运行**：完美融入 macOS 菜单栏或 Windows 托盘，告别繁杂的 Dock 栏图标。支持在全新设置界面自定义自动同步间隔。
+- 📦 **高级多格式导出**：
+  - 导出排版绝美、适合阅读与打印的 **原生 PDF**。
+  - 导出带有本地媒体路径的纯粹 **Markdown**。
+  - 导出打包好一切附件与数据的单会话 **ZIP 压缩包**。
+- 📅 **Voyager 风格时间轴**：侧边栏重构，成百上千的对话现在会自动按照“本月”、“上个月”、“2026年6月”等维度优雅分组。
+- 🌐 **现代化多语言架构**：全方位支持简体中文与英文无缝切换。
+- ⚡ **无忧同步引擎**：底层网络波动自动容错，媒体文件下载失败最高触发 3 次指数退避重试，最大可能保证你的数据完整性，不留遗漏。
 
-**浏览体验**
-- 原生 macOS 界面，支持亮色 / 暗色主题自动切换
-- 对话内容完整渲染：Markdown、代码高亮、数学公式（LaTeX）
-- 时间轴快速跳转，千条对话秒级定位
-- 右键删除单条对话
-
-**导出**
-- 支持按时间范围筛选（全部 / 最近 3 天 / 7 天 / 一个月）
-- 导出格式：
-  - 原始数据
-  - [Kelivo](https://github.com/Chevey339/kelivo)
-  - [Kelivo](https://github.com/Chevey339/kelivo) 分包（将数据拆分为多个小包，解决 iOS 设备单次导入量有限的问题）
-- 导出前预览文件数量与体积
+### 基础能力
+- **零配置同步**：macOS 自动读取 Chrome 的 Gemini 登录态，点击即同步；Windows 首次内置浏览器登录即可。
+- **全量归档**：不仅同步文本，更将用户上传的文件、AI 生成的图片、音乐、视频甚至 Deep Research 深度研究报告等全数存至本地。
+- **卓越阅读体验**：原生 UI、自动深浅色切换、全量 Markdown 支持（代码高亮、LaTeX 数学公式）。
 
 ---
 
-## 安全
+## 🔒 隐私声明
 
-**所有操作均在本地完成，不上传任何数据。**
+**完全在本地运行，你的数据永远不会上传到任何服务器。**
 
-- **macOS**：读取本机 Chrome Cookie 完成 Gemini 授权，无需手动登录
-- **Windows**：通过内置 WebView2 浏览器完成 Google 登录，Cookie 仅存储在本地
-- 所有同步内容保存在本地，不经过任何第三方服务器
-- 无需注册账号，无需额外授权
+- **macOS**：只在本地读取 Chrome 的 cookie，无需你输入账号密码。
+- **Windows**：通过内置的 WebView2 进行 Google 登录，cookie 仅保留在你的本地硬盘中。
+- 所有同步下来的聊天记录只存在你的电脑上。
 
 ---
 
-## 安装
+## 🚀 下载与安装
 
-| 平台 | 状态 | 说明 |
+| 平台 | 状态 | 步骤 |
 |:---|:---:|:---|
-| macOS | ✅ 已支持 | 从 [Releases](https://github.com/FirenzeLor/gemini-collector/releases) 下载最新 `.dmg`，拖入 Applications 即可 |
-| Windows | ✅ 已支持 | 从 [Releases](https://github.com/FirenzeLor/gemini-collector/releases) 下载最新安装包，运行安装即可 |
+| macOS | ✅ | 在 Releases 下载最新的 `.dmg`，拖入应用程序即可 |
+| Windows | ✅ | 在 Releases 下载最新的安装程序并运行 |
 
-> **macOS 首次打开提示"无法验证开发者"**：前往 **系统设置 → 隐私与安全性** 点击"仍要打开"即可。
+> **macOS“无法打开”提示**：进入**系统设置 → 隐私与安全性**，向下滚动并点击“仍要打开”。
 >
-> **提示"已损坏"**：在终端执行以下命令后重新打开：
+> **macOS“已损坏”提示**：在终端执行以下命令，然后重新打开：
 > ```bash
-> xattr -cr /Applications/gemini-collector.app
+> xattr -cr /Applications/Chat-Vault.app
 > ```
 
 ---
 
-## 使用前提
+## 🙏 致谢
 
-**macOS**
-- macOS 12 及以上
-- 已安装 Google Chrome，并在 Chrome 中登录了 Gemini（[gemini.google.com](https://gemini.google.com)）
+本项目的诞生离不开开源社区的伟大贡献，我们基于以下卓越项目进行了深度二次开发：
+- [**FirenzeLor/gemini-collector**](https://github.com/FirenzeLor/gemini-collector)：提供了坚实的同步引擎与基础 UI 框架。
+- [**Nagi-ovo/gemini-voyager**](https://github.com/Nagi-ovo/gemini-voyager)：启发了我们的 Timeline 时间轴设计与交互思路。
 
-**Windows**
-- Windows 10 (1803+) 及以上
-- 首次使用时需在 App 内登录 Google 账号（无需安装 Chrome）
+向原作者致以最诚挚的感谢！
 
 ---
 
-## 许可证
+## 📄 许可协议
 
-[GNU AGPL-3.0](./LICENSE) — 可免费使用、修改和分发。但若将修改后的版本作为网络服务对外提供，或进行分发，必须以相同协议公开完整的对应源代码。
-
-**双授权：** 如需用于无法遵守 AGPL 的专有/闭源产品或托管服务，可单独获取[商业授权](./COMMERCIAL-LICENSE.md)。
+[GNU AGPL-3.0](./LICENSE) — 自由使用、修改与分享。如果你修改了此项目并作为网络服务运行或分发，必须开源相同的源代码。

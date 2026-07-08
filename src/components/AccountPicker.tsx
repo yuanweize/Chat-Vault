@@ -4,6 +4,7 @@ import { useTheme } from "../theme";
 import { IS_WINDOWS } from "../utils/platform";
 import { hoverHandlers } from "../utils/hoverHandlers";
 import { SpinnerIcon, SunIcon, MoonIcon, SyncIcon } from "./Icons";
+import { useTranslation } from "react-i18next";
 
 interface AccountPickerProps {
   accounts: Account[];
@@ -17,30 +18,31 @@ interface AccountPickerProps {
 }
 
 export function AccountPicker({ accounts, loading, importError, onSelect, isDark, onToggleDark, onReload, reloading }: AccountPickerProps) {
-  const t = useTheme();
+  const tTheme = useTheme();
+  const { t } = useTranslation();
 
   return (
-    <div style={{ width: "100%", height: "100vh", background: t.appBg, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", position: "relative" }}>
+    <div style={{ width: "100%", height: "100vh", background: tTheme.appBg, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", position: "relative" }}>
       {/* Drag region for window */}
       <div data-tauri-drag-region style={{ position: "absolute", top: 0, left: 0, right: 0, height: IS_WINDOWS ? 8 : 52 }} />
 
       {/* Dark mode toggle */}
       <button
         onClick={onToggleDark}
-        title={isDark ? "切换到亮色模式" : "切换到暗色模式"}
-        style={{ position: "absolute", top: 14, right: 14, width: 28, height: 28, borderRadius: 7, border: "none", background: t.topBarBg, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", transition: "background 0.15s", backdropFilter: "blur(24px) saturate(112%)", WebkitBackdropFilter: "blur(24px) saturate(112%)" }}
-        {...hoverHandlers(t.btnHoverBg)}
+        title={isDark ? t("account.switchLight") : t("account.switchDark")}
+        style={{ position: "absolute", top: 14, right: 14, width: 28, height: 28, borderRadius: 4, border: `2px solid ${tTheme.border}`, background: tTheme.topBarBg, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", transition: "background 0.15s" }}
+        {...hoverHandlers(tTheme.btnHoverBg)}
       >
-        {isDark ? <SunIcon color={t.textSub} /> : <MoonIcon color={t.textSub} />}
+        {isDark ? <SunIcon color={tTheme.textSub} /> : <MoonIcon color={tTheme.textSub} />}
       </button>
 
       {/* App identity */}
       <div style={{ textAlign: "center", marginBottom: 36 }}>
-        <div style={{ width: 56, height: 56, borderRadius: 16, background: "linear-gradient(135deg, #4285f4 0%, #34a853 50%, #ea4335 100%)", display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 14px", boxShadow: "0 4px 16px rgba(66,133,244,0.3)" }}>
+        <div style={{ width: 56, height: 56, borderRadius: 8, background: "#3b82f6", display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 14px" }}>
           <svg width="28" height="28" viewBox="0 0 24 24" fill="white"><path d="M12 2l2.4 7.4H22l-6.2 4.5 2.4 7.4L12 17l-6.2 4.3 2.4-7.4L2 9.4h7.6z" /></svg>
         </div>
-        <div style={{ fontSize: 22, fontWeight: 700, color: t.text, letterSpacing: -0.3 }}>Gemini Chat</div>
-        <div style={{ fontSize: 13, color: t.textSub, marginTop: 4 }}>选择要使用的账号</div>
+        <div style={{ fontSize: 22, fontWeight: 800, color: tTheme.text, letterSpacing: -0.5 }}>Chat Vault</div>
+        <div style={{ fontSize: 13, color: tTheme.textSub, marginTop: 4, fontWeight: 500 }}>{t("account.selectAccount")}</div>
       </div>
 
       {/* Reload icon — right above the card */}
@@ -48,33 +50,33 @@ export function AccountPicker({ accounts, loading, importError, onSelect, isDark
         <button
           onClick={onReload}
           disabled={reloading || loading}
-          title="重新检测账号"
-          style={{ marginBottom: 6, background: "transparent", border: "none", cursor: reloading || loading ? "default" : "pointer", padding: 6, borderRadius: 8, display: "flex", alignItems: "center", justifyContent: "center", opacity: reloading || loading ? 0.4 : 0.5, transition: "opacity 0.15s" }}
-          onMouseEnter={(e) => { if (!reloading && !loading) (e.currentTarget as HTMLElement).style.opacity = "0.85"; }}
-          onMouseLeave={(e) => { if (!reloading && !loading) (e.currentTarget as HTMLElement).style.opacity = "0.5"; }}
+          title={t("account.redetect")}
+          style={{ marginBottom: 6, background: "transparent", border: "none", cursor: reloading || loading ? "default" : "pointer", padding: 6, borderRadius: 4, display: "flex", alignItems: "center", justifyContent: "center", opacity: reloading || loading ? 0.4 : 0.7, transition: "opacity 0.15s" }}
+          onMouseEnter={(e) => { if (!reloading && !loading) (e.currentTarget as HTMLElement).style.opacity = "1"; }}
+          onMouseLeave={(e) => { if (!reloading && !loading) (e.currentTarget as HTMLElement).style.opacity = "0.7"; }}
         >
-          <SyncIcon spinning={!!reloading} color={t.textSub} />
+          <SyncIcon spinning={!!reloading} color={tTheme.textSub} />
         </button>
       )}
 
       {/* Content area */}
-      <div style={{ width: 360, background: t.cardBg, borderRadius: 16, boxShadow: t.isDark ? "0 16px 34px rgba(5,10,20,0.42)" : "0 16px 34px rgba(70,102,156,0.2)", backdropFilter: "blur(32px) saturate(115%)", WebkitBackdropFilter: "blur(32px) saturate(115%)", overflow: "hidden", minHeight: 64 }}>
+      <div style={{ width: 360, background: tTheme.cardBg, borderRadius: 8, border: `2px solid ${tTheme.border}`, overflow: "hidden", minHeight: 64 }}>
         {loading ? (
           /* Loading state */
           <div style={{ display: "flex", alignItems: "center", justifyContent: "center", padding: 32 }}>
-            <SpinnerIcon color={t.textMuted} />
+            <SpinnerIcon color={tTheme.textMuted} />
           </div>
         ) : accounts.length === 0 ? (
           /* No accounts */
           <div style={{ display: "flex", flexDirection: "column", alignItems: "center", padding: "28px 24px" }}>
-            <div style={{ fontSize: 13, color: t.textSub, textAlign: "center", lineHeight: 1.6 }}>
+            <div style={{ fontSize: 13, color: tTheme.textSub, textAlign: "center", lineHeight: 1.6, fontWeight: 500 }}>
               {IS_WINDOWS ? (<>
-                未找到本地账号数据。<br />
-                请点击下方按钮登录 Google 账号。
+                {t("account.noLocalAccount")}<br />
+                {t("account.loginGoogle")}
               </>) : (<>
-                未找到本地账号数据。<br />
-                应用已自动尝试从本地浏览器 Cookies 导入账号。<br />
-                请确认已在 Chrome 登录 Gemini 后重新打开应用。
+                {t("account.noLocalAccount")}<br />
+                {t("account.autoTriedBrowser")}<br />
+                {t("account.confirmGeminiLogin")}
               </>)}
             </div>
             {IS_WINDOWS && onReload && (
@@ -83,19 +85,19 @@ export function AccountPicker({ accounts, loading, importError, onSelect, isDark
                 disabled={reloading || loading}
                 style={{
                   marginTop: 18,
-                  padding: "9px 28px",
-                  borderRadius: 10,
+                  padding: "10px 28px",
+                  borderRadius: 4,
                   border: "none",
-                  background: "linear-gradient(135deg, #4285f4 0%, #34a853 100%)",
+                  background: "#3b82f6",
                   color: "#fff",
                   fontSize: 14,
                   fontWeight: 600,
                   cursor: reloading || loading ? "default" : "pointer",
                   opacity: reloading || loading ? 0.6 : 1,
-                  transition: "opacity 0.15s",
+                  transition: "opacity 0.15s, background 0.15s",
                 }}
               >
-                {reloading ? "正在等待登录..." : "登录 Google 账号"}
+                {reloading ? t("account.waitingLogin") : t("account.loginGoogleBtn")}
               </button>
             )}
             {importError && (
@@ -103,17 +105,17 @@ export function AccountPicker({ accounts, loading, importError, onSelect, isDark
                 marginTop: 16,
                 width: "100%",
                 padding: "12px 14px",
-                borderRadius: 10,
-                background: t.isDark ? "rgba(239,68,68,0.12)" : "rgba(239,68,68,0.08)",
-                border: `1px solid ${t.isDark ? "rgba(239,68,68,0.25)" : "rgba(239,68,68,0.2)"}`,
+                borderRadius: 4,
+                background: tTheme.isDark ? "#7f1d1d" : "#fee2e2",
+                border: `2px solid ${tTheme.isDark ? "#b91c1c" : "#f87171"}`,
               }}>
-                <div style={{ fontSize: 12, fontWeight: 600, color: t.isDark ? "#f87171" : "#dc2626", marginBottom: 6 }}>
-                  诊断信息
+                <div style={{ fontSize: 12, fontWeight: 700, color: tTheme.isDark ? "#fca5a5" : "#b91c1c", marginBottom: 6 }}>
+                  {t("account.diagnosticInfo")}
                 </div>
                 <pre style={{
                   fontSize: 11,
                   lineHeight: 1.5,
-                  color: t.isDark ? "#fca5a5" : "#991b1b",
+                  color: tTheme.isDark ? "#fca5a5" : "#991b1b",
                   margin: 0,
                   whiteSpace: "pre-wrap",
                   wordBreak: "break-all",
@@ -143,7 +145,8 @@ export function AccountPicker({ accounts, loading, importError, onSelect, isDark
 }
 
 function AccountRow({ account, showDivider, onClick }: { account: Account; showDivider: boolean; onClick: () => void }) {
-  const t = useTheme();
+  const tTheme = useTheme();
+  const { t } = useTranslation();
   const [hovered, setHovered] = React.useState(false);
 
   return (
@@ -151,35 +154,34 @@ function AccountRow({ account, showDivider, onClick }: { account: Account; showD
       onClick={onClick}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
-      style={{ padding: "13px 18px", display: "flex", alignItems: "center", gap: 12, cursor: "pointer", borderBottom: showDivider ? `1px solid ${t.divider}` : "none", background: hovered ? t.hover : "transparent", transition: "background 0.12s" }}
+      style={{ padding: "13px 18px", display: "flex", alignItems: "center", gap: 12, cursor: "pointer", borderBottom: showDivider ? `2px solid ${tTheme.border}` : "none", background: hovered ? tTheme.hover : "transparent", transition: "background 0.12s" }}
     >
-      <div style={{ width: 36, height: 36, borderRadius: "50%", background: account.avatarColor, display: "flex", alignItems: "center", justifyContent: "center", color: "#fff", fontWeight: 700, fontSize: 15, flexShrink: 0, boxShadow: "0 1px 4px rgba(0,0,0,0.12)" }}>
+      <div style={{ width: 36, height: 36, borderRadius: 4, background: account.avatarColor, display: "flex", alignItems: "center", justifyContent: "center", color: "#fff", fontWeight: 700, fontSize: 15, flexShrink: 0 }}>
         {account.avatarText}
       </div>
       <div style={{ flex: 1, overflow: "hidden" }}>
         <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-          <div style={{ fontSize: 14, fontWeight: 600, color: t.text, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{account.name}</div>
+          <div style={{ fontSize: 14, fontWeight: 700, color: tTheme.text, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{account.name}</div>
           {account.listSyncPending && (
             <span
-              title="列表同步未完成"
+              title={t("account.syncIncomplete")}
               style={{
                 width: 8,
                 height: 8,
-                borderRadius: "50%",
+                borderRadius: 4,
                 background: "#ef4444",
-                boxShadow: "0 0 0 2px rgba(239,68,68,0.16)",
                 flexShrink: 0,
               }}
             />
           )}
         </div>
-        <div style={{ fontSize: 12, color: t.textSub, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", marginTop: 1 }}>{account.email}</div>
+        <div style={{ fontSize: 12, fontWeight: 500, color: tTheme.textSub, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", marginTop: 1 }}>{account.email}</div>
       </div>
       <div style={{ textAlign: "right", flexShrink: 0 }}>
-        <div style={{ fontSize: 12, color: t.textMuted }}>{account.conversationCount} 条对话</div>
-        <div style={{ fontSize: 11, color: t.textMuted, marginTop: 1 }}>{account.lastSyncAt ? account.lastSyncAt.slice(0, 10) : "未同步"}</div>
+        <div style={{ fontSize: 12, fontWeight: 600, color: tTheme.textMuted }}>{t("account.conversations", { count: account.conversationCount })}</div>
+        <div style={{ fontSize: 11, fontWeight: 500, color: tTheme.textMuted, marginTop: 1 }}>{account.lastSyncAt ? account.lastSyncAt.slice(0, 10) : t("account.syncNotDone")}</div>
       </div>
-      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke={t.textMuted} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="9 18 15 12 9 6" /></svg>
+      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke={tTheme.textMuted} strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><polyline points="9 18 15 12 9 6" /></svg>
     </div>
   );
 }

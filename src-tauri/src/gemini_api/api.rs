@@ -13,12 +13,12 @@ use std::sync::OnceLock;
 
 use crate::browser_info;
 use crate::cookies::list_accounts;
-use crate::str_err::ToStringErr;
 use crate::protocol::{
-    diagnose_auth_page, email_to_account_id, extract_chat_latest_update, to_iso_utc,
-    BATCH_SIZE, DETAIL_PAGE_SIZE, GEMINI_BASE,
+    diagnose_auth_page, email_to_account_id, extract_chat_latest_update, to_iso_utc, BATCH_SIZE,
+    DETAIL_PAGE_SIZE, GEMINI_BASE,
 };
 use crate::storage;
+use crate::str_err::ToStringErr;
 
 use super::GeminiExporter;
 
@@ -103,18 +103,19 @@ impl GeminiExporter {
             ("sec-fetch-mode", browser_info::NAVIGATE_SEC_FETCH_MODE),
             ("sec-fetch-site", browser_info::NAVIGATE_SEC_FETCH_SITE),
             ("sec-fetch-user", browser_info::NAVIGATE_SEC_FETCH_USER),
-            ("upgrade-insecure-requests", browser_info::NAVIGATE_UPGRADE_INSECURE_REQUESTS),
-            ("x-browser-channel", browser_info::NAVIGATE_X_BROWSER_CHANNEL),
+            (
+                "upgrade-insecure-requests",
+                browser_info::NAVIGATE_UPGRADE_INSECURE_REQUESTS,
+            ),
+            (
+                "x-browser-channel",
+                browser_info::NAVIGATE_X_BROWSER_CHANNEL,
+            ),
             ("x-browser-year", browser_info::browser_year()),
             ("x-browser-copyright", browser_info::browser_copyright()),
         ];
         let resp = self
-            .client_get_with_retry(
-                &url,
-                &params,
-                6,
-                &navigate_headers,
-            )
+            .client_get_with_retry(&url, &params, 6, &navigate_headers)
             .await?;
 
         let status = resp.status();
@@ -147,9 +148,7 @@ impl GeminiExporter {
         self.bl = bl_re()
             .captures(&html)
             .map(|c| c[1].to_string())
-            .or_else(|| {
-                Some("boq_assistant-bard-web-server_20260210.04_p0".to_string())
-            });
+            .or_else(|| Some("boq_assistant-bard-web-server_20260210.04_p0".to_string()));
 
         // 提取 FdrFJe (fsid)
         self.fsid = fsid_re()
@@ -199,12 +198,7 @@ impl GeminiExporter {
         for idx in 0..10 {
             let params = vec![("authuser", idx.to_string())];
             match self
-                .client_get_with_retry(
-                    &format!("{}/app", GEMINI_BASE),
-                    &params,
-                    1,
-                    &[],
-                )
+                .client_get_with_retry(&format!("{}/app", GEMINI_BASE), &params, 1, &[])
                 .await
             {
                 Ok(resp) => {
@@ -303,8 +297,7 @@ impl GeminiExporter {
 
         loop {
             page += 1;
-            let (items, next_token) =
-                self.get_chats_page(cursor.as_deref()).await?;
+            let (items, next_token) = self.get_chats_page(cursor.as_deref()).await?;
 
             if items.is_empty() && next_token.is_none() {
                 if page == 1 {
@@ -345,21 +338,9 @@ impl GeminiExporter {
         cursor: Option<&str>,
     ) -> Result<(Vec<serde_json::Value>, Option<String>), String> {
         let source_path = format!("/app/{}", crate::protocol::strip_c_prefix(conv_id));
-        let payload = json!([
-            conv_id,
-            DETAIL_PAGE_SIZE,
-            cursor,
-            1,
-            [1],
-            [4],
-            null,
-            1
-        ])
-        .to_string();
+        let payload = json!([conv_id, DETAIL_PAGE_SIZE, cursor, 1, [1], [4], null, 1]).to_string();
 
-        let result = self
-            .batchexecute("hNvQHb", &payload, &source_path)
-            .await?;
+        let result = self.batchexecute("hNvQHb", &payload, &source_path).await?;
 
         if !result.is_array() {
             return Ok((Vec::new(), None));
@@ -382,10 +363,7 @@ impl GeminiExporter {
     }
 
     /// 获取单个对话的完整内容（含分页）。
-    pub async fn get_chat_detail(
-        &self,
-        conv_id: &str,
-    ) -> Result<Vec<serde_json::Value>, String> {
+    pub async fn get_chat_detail(&self, conv_id: &str) -> Result<Vec<serde_json::Value>, String> {
         let mut all_turns = Vec::new();
         let mut cursor: Option<String> = None;
 
@@ -463,8 +441,7 @@ impl GeminiExporter {
                 Some(t) => {
                     let payload =
                         json!([conv_id, DETAIL_PAGE_SIZE, t, 1, [1], [4], null, 1]).to_string();
-                    current_result =
-                        self.batchexecute("hNvQHb", &payload, &source_path).await?;
+                    current_result = self.batchexecute("hNvQHb", &payload, &source_path).await?;
                 }
                 None => break,
             }
@@ -490,15 +467,12 @@ impl GeminiExporter {
 
         // 如果有外部指定的 account_id
         if let Some(ref override_id) = self.account_id_override {
-            email = self
-                .account_email_override
-                .clone()
-                .or_else(|| {
-                    self.user_spec
-                        .as_ref()
-                        .filter(|s| s.contains('@'))
-                        .map(|s| s.to_lowercase())
-                });
+            email = self.account_email_override.clone().or_else(|| {
+                self.user_spec
+                    .as_ref()
+                    .filter(|s| s.contains('@'))
+                    .map(|s| s.to_lowercase())
+            });
 
             let name = email
                 .as_ref()
@@ -591,8 +565,7 @@ impl GeminiExporter {
 
     /// 列出可选邮箱及其 authuser 映射。
     pub async fn list_user_options(&self) -> Result<Vec<UserOption>, String> {
-        let mappings =
-            list_accounts::discover_email_authuser_mapping(&self.cookies).await?;
+        let mappings = list_accounts::discover_email_authuser_mapping(&self.cookies).await?;
 
         // 去重
         let mut dedup = std::collections::HashMap::<String, &list_accounts::AccountMapping>::new();
@@ -616,12 +589,8 @@ impl GeminiExporter {
             let mut fsid: Option<String> = None;
 
             if let Some(ref au) = item.authuser {
-                let mut probe = GeminiExporter::new(
-                    self.cookies.clone(),
-                    Some(au.clone()),
-                    None,
-                    None,
-                );
+                let mut probe =
+                    GeminiExporter::new(self.cookies.clone(), Some(au.clone()), None, None);
                 match probe.init_auth().await {
                     Ok(()) => {
                         gemini_ok = Some(true);
@@ -645,19 +614,22 @@ impl GeminiExporter {
         result.sort_by(|a, b| {
             let a_none = a.authuser.is_none() as u8;
             let b_none = b.authuser.is_none() as u8;
-            a_none.cmp(&b_none).then_with(|| {
-                let a_num: u32 = a
-                    .authuser
-                    .as_ref()
-                    .and_then(|s| s.parse().ok())
-                    .unwrap_or(999);
-                let b_num: u32 = b
-                    .authuser
-                    .as_ref()
-                    .and_then(|s| s.parse().ok())
-                    .unwrap_or(999);
-                a_num.cmp(&b_num)
-            }).then_with(|| a.email.cmp(&b.email))
+            a_none
+                .cmp(&b_none)
+                .then_with(|| {
+                    let a_num: u32 = a
+                        .authuser
+                        .as_ref()
+                        .and_then(|s| s.parse().ok())
+                        .unwrap_or(999);
+                    let b_num: u32 = b
+                        .authuser
+                        .as_ref()
+                        .and_then(|s| s.parse().ok())
+                        .unwrap_or(999);
+                    a_num.cmp(&b_num)
+                })
+                .then_with(|| a.email.cmp(&b.email))
         });
 
         Ok(result)

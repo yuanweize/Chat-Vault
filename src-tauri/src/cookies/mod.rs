@@ -32,10 +32,7 @@ pub struct CookieRow {
 }
 
 /// Read and decrypt all Google-domain cookies from a Chrome Cookies SQLite file.
-pub fn read_chrome_cookies(
-    cookie_db_path: &Path,
-    browser_name: &str,
-) -> Result<Vec<CookieRow>> {
+pub fn read_chrome_cookies(cookie_db_path: &Path, browser_name: &str) -> Result<Vec<CookieRow>> {
     // Copy the db to a temp file to avoid locking issues with a running browser
     let tmp = tempfile_copy(cookie_db_path)?;
     let conn = Connection::open(&tmp)
@@ -68,10 +65,7 @@ pub fn read_chrome_cookies(
             match chrome_decrypt::decrypt_chrome_cookie_value(&encrypted_value, &key) {
                 Ok(v) => v,
                 Err(e) => {
-                    log::warn!(
-                        "decrypt failed for cookie '{}' on {}: {}",
-                        name, domain, e
-                    );
+                    log::warn!("decrypt failed for cookie '{}' on {}: {}", name, domain, e);
                     continue;
                 }
             }
@@ -111,7 +105,10 @@ pub(crate) fn tempfile_copy(src: &Path) -> Result<std::path::PathBuf> {
     // Also copy WAL and SHM files if they exist
     let src_wal = src.with_extension("sqlite-wal");
     if src_wal.exists() {
-        let wal_name = format!("{}-wal", src.file_name().unwrap_or_default().to_string_lossy());
+        let wal_name = format!(
+            "{}-wal",
+            src.file_name().unwrap_or_default().to_string_lossy()
+        );
         let src_wal2 = src.with_file_name(&wal_name);
         let dst_wal = tmp.with_file_name(format!(
             "{}-wal",
@@ -183,11 +180,7 @@ pub fn get_cookies_from_local_browser() -> Result<HashMap<String, String>> {
                     continue;
                 }
                 if key_cookies.iter().any(|k| selected.contains_key(*k)) {
-                    log::info!(
-                        "  - {}: 成功读取 {} 个 cookies",
-                        label,
-                        selected.len()
-                    );
+                    log::info!("  - {}: 成功读取 {} 个 cookies", label, selected.len());
                     return Ok(selected);
                 }
                 log::warn!(

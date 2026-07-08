@@ -62,6 +62,7 @@ export interface Conversation {
   updatedAt: string;   // ISO 8601
   remoteHash: string | null;
   parseWarning?: string;
+  folderId?: string;   // Custom local folder assignment
   messages: ConvMessage[];
 }
 
@@ -78,6 +79,14 @@ export interface ConversationSummary {
   updatedAt: string;        // ISO 8601
   createdAt?: string;       // ISO 8601, injected from .jsonl meta at load time
   remoteHash: string | null;
+  folderId?: string;        // Custom local folder assignment
+}
+
+export interface Folder {
+  id: string;
+  name: string;
+  color?: string;
+  order?: number;
 }
 
 export interface SearchResult {
@@ -101,4 +110,20 @@ export interface Account {
   lastSyncResult: "success" | "partial" | "failed" | null;
   authuser?: string | null;
   listSyncPending?: boolean;
+}
+
+export interface AccountExportStats {
+  accountId: string;
+  conversationCount: number;
+  conversationFileCount: number;
+  mediaFileCount: number;
+  totalFileCount: number;
+  totalBytes: number;
+  estimatedZipBytes: number;
+}
+
+export interface AccountExportResult extends AccountExportStats {
+  zipPath: string;
+  fileName: string;
+  zipSizeBytes: number;
 }

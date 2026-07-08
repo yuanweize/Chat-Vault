@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "gemini-collector",
-  "version": "2.0.7",
-  "identifier": "com.gemini-collector",
+  "productName": "Chat Vault",
+  "version": "3.0.0",
+  "identifier": "com.chat-vault",
   "build": {
     "beforeDevCommand": "npm run dev",
     "devUrl": "http://localhost:1420",
@@ -12,14 +12,15 @@
   "app": {
     "windows": [
       {
-        "title": "Gemini Chat",
+        "title": "Chat Vault",
         "width": 1100,
         "height": 720,
         "minWidth": 700,
         "minHeight": 500,
         "titleBarStyle": "Overlay",
         "hiddenTitle": true,
-        "shadow": false
+        "shadow": false,
+        "visible": true
       }
     ],
     "security": {
@@ -28,6 +29,11 @@
         "enable": true,
         "scope": ["**"]
       }
+    },
+    "trayIcon": {
+      "iconPath": "icons/tray-icon.png",
+      "iconAsTemplate": true,
+      "tooltip": "Chat Vault"
     }
   },
   "bundle": {
@@ -40,5 +46,8 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ]
+  },
+  "plugins": {
+    "notification": {}
   }
 }

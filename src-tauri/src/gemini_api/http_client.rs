@@ -35,7 +35,10 @@ pub fn build_http_client(cookies: &HashMap<String, String>) -> reqwest::Client {
     if let Ok(val) = reqwest::header::HeaderValue::from_str(browser_info::build_sec_ch_ua()) {
         headers.insert("sec-ch-ua", val);
     }
-    headers.insert("sec-ch-ua-mobile", reqwest::header::HeaderValue::from_static("?0"));
+    headers.insert(
+        "sec-ch-ua-mobile",
+        reqwest::header::HeaderValue::from_static("?0"),
+    );
     if let Ok(val) = reqwest::header::HeaderValue::from_str(browser_info::platform_hint()) {
         headers.insert("sec-ch-ua-platform", val);
     }

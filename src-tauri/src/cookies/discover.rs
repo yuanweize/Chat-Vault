@@ -118,10 +118,8 @@ pub fn discover_chrome_cookie_files() -> (Vec<CookieFileEntry>, Vec<String>) {
                                 });
                             }
                             Err(detail) => {
-                                permission_issues.push(format!(
-                                    "[{}/{}] {}",
-                                    spec.name, profile_name, detail
-                                ));
+                                permission_issues
+                                    .push(format!("[{}/{}] {}", spec.name, profile_name, detail));
                             }
                         }
                         break; // Network/Cookies found, skip plain Cookies

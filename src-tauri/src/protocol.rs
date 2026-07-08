@@ -150,7 +150,6 @@ pub fn strip_c_prefix(chat_id: &str) -> String {
     }
 }
 
-
 /// 诊断认证页面
 pub fn diagnose_auth_page(html: &str, final_url: &str) -> String {
     let text = html.to_lowercase();
@@ -295,9 +294,7 @@ fn iter_batchexecute_wrb_items(resp_text: &str) -> Vec<(String, Option<String>)>
 }
 
 /// 解析 batchexecute 响应，返回 [(rpcid, data)] 仅含有效数据条目
-pub fn parse_batchexecute_response(
-    resp_text: &str,
-) -> Vec<(String, serde_json::Value)> {
+pub fn parse_batchexecute_response(resp_text: &str) -> Vec<(String, serde_json::Value)> {
     let mut items = Vec::new();
     for (rpcid, raw) in iter_batchexecute_wrb_items(resp_text) {
         if let Some(raw_str) = raw {
@@ -326,7 +323,10 @@ mod tests {
     #[test]
     fn test_email_to_account_id() {
         assert_eq!(email_to_account_id("User@Gmail.Com"), "user_gmail_com");
-        assert_eq!(email_to_account_id("  test.user@example.com  "), "test_user_example_com");
+        assert_eq!(
+            email_to_account_id("  test.user@example.com  "),
+            "test_user_example_com"
+        );
     }
 
     #[test]
