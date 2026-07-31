@@ -10,14 +10,32 @@ import { Virtuoso, VirtuosoHandle } from "react-virtuoso";
 import { useTranslation } from "react-i18next";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { openUrl, openPath } from "@tauri-apps/plugin-opener";
-import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
-import { oneLight, vscDarkPlus } from "react-syntax-highlighter/dist/esm/styles/prism";
+import SyntaxHighlighter from "react-syntax-highlighter/dist/esm/prism-light";
+import bash from "react-syntax-highlighter/dist/esm/languages/prism/bash";
+import css from "react-syntax-highlighter/dist/esm/languages/prism/css";
+import javascript from "react-syntax-highlighter/dist/esm/languages/prism/javascript";
+import json from "react-syntax-highlighter/dist/esm/languages/prism/json";
+import jsx from "react-syntax-highlighter/dist/esm/languages/prism/jsx";
+import markdown from "react-syntax-highlighter/dist/esm/languages/prism/markdown";
+import markup from "react-syntax-highlighter/dist/esm/languages/prism/markup";
+import python from "react-syntax-highlighter/dist/esm/languages/prism/python";
+import rust from "react-syntax-highlighter/dist/esm/languages/prism/rust";
+import sql from "react-syntax-highlighter/dist/esm/languages/prism/sql";
+import tsx from "react-syntax-highlighter/dist/esm/languages/prism/tsx";
+import typescript from "react-syntax-highlighter/dist/esm/languages/prism/typescript";
+import yaml from "react-syntax-highlighter/dist/esm/languages/prism/yaml";
+import oneLight from "react-syntax-highlighter/dist/esm/styles/prism/one-light";
+import vscDarkPlus from "react-syntax-highlighter/dist/esm/styles/prism/vsc-dark-plus";
 import { Attachment, Conversation, ConvMessage } from "../data/types";
 import { useTheme } from "../theme";
-import { CopyIcon, CheckIcon, ChevronRightIcon, DocIcon, SparkIcon, SearchIcon, ExternalLinkIcon } from "./Icons";
+import { CopyIcon, CheckIcon, ChevronRightIcon, DocIcon, SparkIcon, SearchIcon, ExternalLinkIcon, MessageIcon } from "./Icons";
 import { ResearchDetailModal, ResearchModalState } from "./ResearchDetailModal";
 
 const loadedImageUrlCache = new Set<string>();
+
+for (const [name, grammar] of Object.entries({ bash, css, javascript, json, jsx, markdown, markup, python, rust, sql, tsx, typescript, yaml })) {
+  SyntaxHighlighter.registerLanguage(name, grammar);
+}
 
 function getKind(mimeType: string): "image" | "video" | "audio" | "file" {
   if (mimeType.startsWith("image/")) return "image";
@@ -215,6 +233,7 @@ interface HoveredInfo {
 
 function ConversationTimeline({ messages, scrollerEl, visibleRange, onJumpTo }: TimelineProps) {
   const t = useTheme();
+  const { t: tI18n } = useTranslation();
   const barRef = useRef<HTMLDivElement>(null);
   // Long-canvas inner div; moved via translateY (no scroll container = no scrollbar artifact).
   const innerRef = useRef<HTMLDivElement>(null);
@@ -372,7 +391,7 @@ function ConversationTimeline({ messages, scrollerEl, visibleRange, onJumpTo }: 
       .conv-tl-dot { outline: none; }
       .conv-tl-dot:hover .conv-tl-pip { transform: scale(1.55) !important; }
       .conv-tl-dot:focus-visible .conv-tl-pip {
-        outline: 2px solid #0071e3; outline-offset: 3px;
+        outline: 2px solid var(--accent); outline-offset: 3px;
       }
       @keyframes conv-tl-tooltip-in {
         from { opacity: 0; transform: translateY(-50%) translateX(6px); }
@@ -436,7 +455,7 @@ function ConversationTimeline({ messages, scrollerEl, visibleRange, onJumpTo }: 
                 <button
                   key={msg.globalIndex}
                   className="conv-tl-dot"
-                  aria-label={`跳转到：${msg.text.slice(0, 40)}`}
+                  aria-label={tI18n("chatview.jumpTo", { text: msg.text.slice(0, 40) })}
                   onClick={() => onJumpTo(msg.globalIndex)}
                   onMouseEnter={(e) => {
                     if (tooltipTimerRef.current) clearTimeout(tooltipTimerRef.current);
@@ -479,7 +498,7 @@ function ConversationTimeline({ messages, scrollerEl, visibleRange, onJumpTo }: 
                       width: dotSize,
                       height: dotSize,
                       borderRadius: "50%",
-                      background: isActive ? "#0071e3" : dotColor,
+                      background: isActive ? "var(--accent)" : dotColor,
                       border: isActive ? `1px solid ${t.textSub}` : "none",
                       transition:
                         "width 0.15s ease, height 0.15s ease, background 0.15s ease, box-shadow 0.15s ease, transform 0.15s ease",
@@ -518,7 +537,7 @@ function ConversationTimeline({ messages, scrollerEl, visibleRange, onJumpTo }: 
             fontSize: 12.5,
             lineHeight: 1.55,
             color: t.text,
-            border: `2px solid ${t.border}`,
+            border: `1px solid ${t.border}`,
             wordBreak: "break-word",
             whiteSpace: "pre-wrap",
             overflow: "hidden",
@@ -546,6 +565,7 @@ export function MarkdownCodeBlock({
   isDark: boolean;
 }) {
   const [copied, setCopied] = useState(false);
+  const { t } = useTranslation();
 
   function handleCopy() {
     void navigator.clipboard.writeText(code)
@@ -562,7 +582,7 @@ export function MarkdownCodeBlock({
     <div style={{ position: "relative", margin: "0.6em 0" }}>
       <button
         onClick={handleCopy}
-        title={copied ? "已复制" : "复制代码"}
+        title={copied ? t("chatview.copied") : t("chatview.copyCode")}
         style={{
           position: "absolute",
           top: 8,
@@ -582,7 +602,7 @@ export function MarkdownCodeBlock({
           cursor: "pointer",
         }}
       >
-        {copied ? "已复制" : "复制"}
+        {copied ? t("chatview.copied") : t("chatview.copy")}
       </button>
       <SyntaxHighlighter
         language={language}
@@ -727,9 +747,11 @@ export function ChatView({ conversation, accountId, mediaDir, mediaVersion = 0, 
     return (
       <div style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", background: "transparent" }}>
         <div style={{ textAlign: "center", color: t.textMuted }}>
-          <div style={{ fontSize: 44, marginBottom: 10 }}>💬</div>
-          <div style={{ fontSize: 15, fontWeight: 600, color: t.text, marginBottom: 5 }}>{tI18n("chatview.selectConversation", "选择一个对话")}</div>
-          <div style={{ fontSize: 13 }}>{tI18n("chatview.selectPrompt", "从左侧列表中选择对话查看内容")}</div>
+          <div style={{ display: "grid", placeItems: "center", width: 48, height: 48, margin: "0 auto 12px", borderRadius: 14, color: "var(--accent)", background: "var(--accent-soft)" }}>
+            <MessageIcon size={24} />
+          </div>
+          <div style={{ fontSize: 15, fontWeight: 600, color: t.text, marginBottom: 5 }}>{tI18n("chatview.selectConversation")}</div>
+          <div style={{ fontSize: 13 }}>{tI18n("chatview.selectPrompt")}</div>
         </div>
       </div>
     );
@@ -754,7 +776,7 @@ export function ChatView({ conversation, accountId, mediaDir, mediaVersion = 0, 
       )}
       {(() => {
         return visibleMessages.length === 0 ? (
-          <div style={{ textAlign: "center", color: t.textMuted, fontSize: 13, marginTop: 60 }}>{tI18n("chatview.noMessages", "暂无消息记录")}</div>
+          <div style={{ textAlign: "center", color: t.textMuted, fontSize: 13, marginTop: 60 }}>{tI18n("chatview.noMessages")}</div>
         ) : (
           // position:relative so the absolutely-positioned timeline bar can anchor to it
           <div style={{ flex: 1, position: "relative", overflow: "hidden" }}>
@@ -883,7 +905,7 @@ function AttachmentStrip({
             textAlign: alignRight ? "right" : "left",
           }}
         >
-          {tI18n("chatview.failedDownloads", { count: failedAttachments.length, defaultValue: `${failedAttachments.length} 个附件下载失败，点击同步可重试` })}
+          {tI18n("chatview.failedDownloads", { count: failedAttachments.length })}
         </div>
       )}
       {/* Media thumbnails */}
@@ -904,7 +926,7 @@ function AttachmentStrip({
               <div
                 key={i}
                 onClick={() => setLightboxIdx(i)}
-                style={{ width: 160, height: 110, borderRadius: 8, overflow: "hidden", cursor: "pointer", flexShrink: 0, background: t.aiBubbleBg, border: `2px solid ${t.border}`, position: "relative", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 6 }}
+                style={{ width: 160, height: 110, borderRadius: 10, overflow: "hidden", cursor: "pointer", flexShrink: 0, background: t.aiBubbleBg, border: `1px solid ${t.border}`, position: "relative", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 6 }}
               >
                 <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,0.7)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
                   <path d="M9 18V5l12-2v13" />
@@ -920,7 +942,7 @@ function AttachmentStrip({
               <div
                 key={i}
                 onClick={() => setLightboxIdx(i)}
-                style={{ width: 160, height: 110, borderRadius: 8, overflow: "hidden", cursor: "pointer", flexShrink: 0, background: "#111", border: `2px solid ${t.border}`, position: "relative" }}
+                style={{ width: 160, height: 110, borderRadius: 10, overflow: "hidden", cursor: "pointer", flexShrink: 0, background: "#111", border: `1px solid ${t.border}`, position: "relative" }}
               >
                 <VideoThumbnail videoUrl={url} />
                 <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", background: "rgba(0,0,0,0.35)" }}>
@@ -950,7 +972,7 @@ function AttachmentStrip({
                 onClick={isTextFile ? () => setFilePreviewIdx(i) : undefined}
                 style={{
                   width: 160, height: 110, borderRadius: 14, overflow: "hidden", flexShrink: 0,
-                  background: t.aiBubbleBg, border: `2px solid ${t.border}`,
+                  background: t.aiBubbleBg, border: `1px solid ${t.border}`,
                   display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
                   gap: 6, padding: "8px 10px",
                   cursor: isTextFile ? "pointer" : "default",
@@ -1039,7 +1061,7 @@ function ImageThumbnail({
         cursor: "pointer",
         flexShrink: 0,
         background: t.isDark ? "#1a1a1c" : "#d9d9dc",
-        border: `2px solid ${t.border}`,
+        border: `1px solid ${t.border}`,
         position: "relative",
       }}
     >
@@ -1251,7 +1273,7 @@ function FilePreviewModal({
           {error ? (
             <div style={{ color: "#f87171", fontSize: 13 }}>{tI18n("chatview.readFailed", { error })}</div>
           ) : content === null ? (
-            <div style={{ color: "rgba(255,255,255,0.4)", fontSize: 13 }}>{tI18n("chatview.loading", "加载中...")}</div>
+            <div style={{ color: "rgba(255,255,255,0.4)", fontSize: 13 }}>{tI18n("chatview.loading")}</div>
           ) : (
             <>
               <pre style={{
@@ -1263,7 +1285,7 @@ function FilePreviewModal({
               </pre>
               {truncated && (
                 <div style={{ marginTop: 12, padding: "8px 0", borderTop: "1px solid rgba(255,255,255,0.08)", color: "rgba(255,255,255,0.4)", fontSize: 11, textAlign: "center" }}>
-                  {tI18n("chatview.fileTooLong", "文件内容过长，仅展示前 128 KB")}
+                  {tI18n("chatview.fileTooLong")}
                 </div>
               )}
             </>
@@ -1370,8 +1392,8 @@ function LightboxModal({
 // aiBubbleBg、同圆角、同阴影）；Canvas 做成消息下方的"附件条"。所有可点击区域
 // 去明显 border，仅 hover 时用 Apple 蓝极淡 tint，不做 scale 形变。
 
-export const ACCENT_BLUE = "#0071e3";
-export const ACCENT_BLUE_DARK = "#9cc9ff";
+export const ACCENT_BLUE = "#5558d9";
+export const ACCENT_BLUE_DARK = "#8588ff";
 
 export function AIMarkdown({
   text,
@@ -1438,7 +1460,7 @@ function aiShellStyle(t: ReturnType<typeof useTheme>): React.CSSProperties {
   return {
     background: t.aiBubbleBg,
     borderRadius: "18px 18px 18px 6px",
-    border: `2px solid ${t.border}`,
+    border: `1px solid ${t.border}`,
     overflow: "hidden",
   };
 }
@@ -1524,7 +1546,7 @@ function CanvasBubble({
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
       disabled={disabled}
-      title={disabled ? tI18n("chatview.mediaMissing", "media 文件缺失") : tI18n("chatview.openInBrowser", { filename: canvas.filename })}
+      title={disabled ? tI18n("chatview.mediaMissing") : tI18n("chatview.openInBrowser", { filename: canvas.filename })}
       style={{
         display: "flex",
         alignItems: "center",
@@ -1622,7 +1644,7 @@ function ResearchPlanBubble({
           textTransform: "uppercase",
         }}>
           <SparkIcon color={accent} size={10} />
-          {tI18n("chatview.researchPlan", "研究计划")}
+          {tI18n("chatview.researchPlan")}
         </div>
         {plan.title && (
           <div style={{ fontSize: 13.5, fontWeight: 600, color: t.text, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
@@ -1720,15 +1742,15 @@ function ResearchReportBubble({
   const entryCount = report.entry_count ?? 0;
   const sourceCount = webCount + fileCount;
   const progressBits: string[] = [];
-  if (rounds > 0) progressBits.push(`${rounds} 轮`);
-  if (sourceCount > 0) progressBits.push(`${sourceCount} 个来源`);
-  const progressMeta = progressBits.join(" · ") || (entryCount > 0 ? `${entryCount} 条记录` : "无调研记录");
+  if (rounds > 0) progressBits.push(tI18n("chatview.rounds", { count: rounds }));
+  if (sourceCount > 0) progressBits.push(tI18n("chatview.sources", { count: sourceCount }));
+  const progressMeta = progressBits.join(" · ") || (entryCount > 0 ? tI18n("chatview.records", { count: entryCount }) : tI18n("chatview.noResearch"));
   const progressDisabled = !report.progress_media_id;
 
   const chars = report.char_count ?? 0;
   const bytes = report.size_bytes ?? 0;
   const reportBits: string[] = [];
-  if (chars > 0) reportBits.push(`${chars.toLocaleString()} 字`);
+  if (chars > 0) reportBits.push(tI18n("chatview.words", { count: chars.toLocaleString() }));
   if (bytes > 0) reportBits.push(formatBytes(bytes));
   const reportMeta = reportBits.join(" · ");
   const reportDisabled = !report.report_media_id;
@@ -1738,7 +1760,7 @@ function ResearchReportBubble({
     onOpenResearch({
       accountId,
       mediaDir,
-      title: report.title || tI18n("chatview.researchReport", "研究报告"),
+      title: report.title || tI18n("chatview.researchReport"),
       reportMediaId: report.report_media_id,
       progressMediaId: report.progress_media_id,
       charCount: report.char_count,
@@ -1825,25 +1847,25 @@ function ResearchReportBubble({
       )}
       {!progressDisabled && row({
         icon: <SearchIcon color={accent} />,
-        label: tI18n("chatview.researchProcess", "调研过程"),
+        label: tI18n("chatview.researchProcess"),
         main: progressMeta,
-        meta: progressBits.length === 2 ? `共 ${entryCount} 条记录` : "",
+        meta: progressBits.length === 2 ? tI18n("chatview.totalRecords", { count: entryCount }) : "",
         hovered: progressHovered,
         setHovered: setProgressHovered,
         disabled: !accountId,
         onClick: () => openResearch("progress"),
-        title: accountId ? tI18n("chatview.viewProcess", "查看调研过程") : tI18n("chatview.missingAccountInfo", "账号信息缺失"),
+        title: accountId ? tI18n("chatview.viewProcess") : tI18n("chatview.missingAccountInfo"),
       })}
       {row({
         icon: <DocIcon color={accent} />,
-        label: "报告详情",
-        main: report.title || "研究报告",
+        label: tI18n("chatview.reportDetails"),
+        main: report.title || tI18n("chatview.researchReport"),
         meta: reportMeta,
         hovered: reportHovered,
         setHovered: setReportHovered,
         disabled: reportDisabled || !accountId,
         onClick: () => openResearch("report"),
-        title: reportDisabled ? "报告正文缺失" : !accountId ? "账号信息缺失" : "查看报告详情",
+        title: reportDisabled ? tI18n("chatview.reportBodyMissing") : !accountId ? tI18n("chatview.missingAccountInfo") : tI18n("chatview.viewReportDetails"),
       })}
     </div>
   );
@@ -1865,6 +1887,7 @@ function MessageBubble({
   onOpenResearch?: (state: ResearchModalState) => void;
 }) {
   const t = useTheme();
+  const { t: tI18n } = useTranslation();
   const [copiedId, setCopiedId] = useState(false);
   const isUser = message.role === "user";
   const hasText = (message.text || "").trim().length > 0;
@@ -1895,7 +1918,7 @@ function MessageBubble({
           setTimeout(() => setCopiedId(false), 850);
         });
       }}
-      title={copiedId ? "已复制" : "复制消息 ID"}
+      title={copiedId ? tI18n("chatview.copied") : tI18n("chatview.copyMessageId")}
       style={{ width: 14, height: 14, borderRadius: 4, border: "none", background: "transparent", cursor: "pointer", display: "inline-flex", alignItems: "center", justifyContent: "center", flexShrink: 0, padding: 0, transition: "background 0.15s", opacity: 0.7 }}
       onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.background = t.btnHoverBg; (e.currentTarget as HTMLElement).style.opacity = "1"; }}
       onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.background = "transparent"; (e.currentTarget as HTMLElement).style.opacity = "0.7"; }}
@@ -1912,13 +1935,13 @@ function MessageBubble({
           <div style={{
             padding: isUser ? "10px 14px" : "12px 16px",
             borderRadius: isUser ? "18px 18px 6px 18px" : "18px 18px 18px 6px",
-            background: isUser ? "linear-gradient(135deg, #0071e3 0%, #0077ed 100%)" : t.aiBubbleBg,
+            background: isUser ? "linear-gradient(135deg, var(--accent) 0%, #6878e8 100%)" : t.aiBubbleBg,
             color: isUser ? "#fff" : t.text,
             fontSize: 14,
             lineHeight: 1.55,
             border: isHighlighted
-              ? `2px solid #0071e3`
-              : isUser ? "none" : `2px solid ${t.border}`,
+              ? `2px solid var(--accent)`
+              : isUser ? "none" : `1px solid ${t.border}`,
             boxShadow: "none",
             transition: "border 0.3s ease",
             wordBreak: "break-word",
@@ -1975,7 +1998,7 @@ function MessageBubble({
           {!isUser && (
             <>
               <span style={{ opacity: 0.4 }}>·</span>
-              <span style={{ color: t.textSub }}>{message.genMeta?.model || message.model || "未知模型"}</span>
+              <span style={{ color: t.textSub }}>{message.genMeta?.model || message.model || tI18n("chatview.unknownModel")}</span>
               {copyIdBtn}
               {message.attachments.length > 0 && (() => {
                 const atts = message.attachments;

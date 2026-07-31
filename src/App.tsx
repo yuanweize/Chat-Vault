@@ -1,23 +1,28 @@
-import { useState, useEffect, useMemo, useRef, useCallback } from "react";
+import { lazy, Suspense, useState, useEffect, useMemo, useRef, useCallback } from "react";
+import { useTranslation } from "react-i18next";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
 import { revealItemInDir } from "@tauri-apps/plugin-opener";
 import { TopBar } from "./components/TopBar";
 import { Sidebar } from "./components/Sidebar";
-import { ChatView } from "./components/ChatView";
 import { AccountPicker } from "./components/AccountPicker";
-import { SettingsModal } from "./components/SettingsModal";
 import { LockScreen } from "./components/LockScreen";
 import { NoticeModal } from "./components/modals/NoticeModal";
 import { ClearConfirmModal } from "./components/modals/ClearConfirmModal";
 import { ExportModal } from "./components/modals/ExportModal";
 import { SyncOverlay } from "./components/modals/SyncOverlay";
+import { LegacyMigrationModal, type LegacyMigrationInfo } from "./components/modals/LegacyMigrationModal";
 import { Account, Conversation, ConversationSummary, AccountExportStats, AccountExportResult } from "./data/types";
+import type { AppSettings } from "./data/settings";
+import { normalizeSettings } from "./data/settings";
 import { ThemeContext, lightTheme, darkTheme } from "./theme";
 
 type Screen = "account-picker" | "chat";
 import { IS_WINDOWS } from "./utils/platform";
+
+const ChatView = lazy(() => import("./components/ChatView").then((module) => ({ default: module.ChatView })));
+const SettingsModal = lazy(() => import("./components/SettingsModal").then((module) => ({ default: module.SettingsModal })));
 
 type ConversationSortMode = "updated_desc" | "size_desc" | "media_desc" | "created_desc";
 // Windows 有原生标题栏占空间，zoom 1.05 会导致底部溢出；同时 52px 拖拽区域是 macOS overlay 专用
@@ -46,6 +51,14 @@ interface WorkerJobStatePayload {
   phase?: string;
   progress?: { current?: number; total?: number };
   error?: WorkerJobError;
+}
+
+interface LegacyMigrationResult {
+  accountCount: number;
+  conversationCount: number;
+  mediaFileCount: number;
+  totalBytes: number;
+  rebuiltSearchAccounts: number;
 }
 
 
@@ -260,7 +273,7 @@ function parseConversationPayload(json: string): Conversation | null {
 }
 
 function App() {
-  
+  const { t, i18n } = useTranslation();
   const [isLocked, setIsLocked] = useState(true);
   const [showSettings, setShowSettings] = useState(false);
   const [screen, setScreen] = useState<Screen>("account-picker");
@@ -284,6 +297,10 @@ function App() {
   const [exportingAccountData, setExportingAccountData] = useState(false);
   const [importingAccountData, setImportingAccountData] = useState(false);
   const [importNotice, setImportNotice] = useState<{ title: string; lines: string[] } | null>(null);
+  const [legacyMigration, setLegacyMigration] = useState<LegacyMigrationInfo | null>(null);
+  const [legacyMigrationBusy, setLegacyMigrationBusy] = useState(false);
+  const [legacyMigrationError, setLegacyMigrationError] = useState<string | null>(null);
+  const [migrationNotice, setMigrationNotice] = useState<{ title: string; lines: string[] } | null>(null);
   const [showExportModal, setShowExportModal] = useState(false);
   const [exportTimeRange, setExportTimeRange] = useState<"all" | "3d" | "7d" | "30d">("all");
   const [exportFormat, setExportFormat] = useState<"zip" | "kelivo" | "kelivo-split">("zip");
@@ -295,6 +312,7 @@ function App() {
   const [showClearConfirm, setShowClearConfirm] = useState(false);
   const [conversationSortMode, setConversationSortMode] = useState<ConversationSortMode>("updated_desc");
   const [isDark, setIsDark] = useState(false);
+  const [appSettings, setAppSettings] = useState<AppSettings | null>(null);
   const autoSyncAttemptedAtRef = useRef<Map<string, number>>(new Map());
   const hasSyncingRef = useRef(false);
   const syncingIdsRef = useRef<string[]>([]);
@@ -307,6 +325,71 @@ function App() {
   useEffect(() => {
     document.documentElement.classList.toggle("dark", isDark);
   }, [isDark]);
+
+  const applyAppSettings = useCallback((value: AppSettings) => {
+    const normalized = normalizeSettings(value);
+    setAppSettings(normalized);
+    void i18n.changeLanguage(normalized.language);
+    const systemDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
+    setIsDark(normalized.theme === "dark" || (normalized.theme === "auto" && systemDark));
+  }, [i18n]);
+
+  useEffect(() => {
+    invoke<AppSettings>("load_settings")
+      .then(applyAppSettings)
+      .catch((error) => console.error("Failed to load app settings:", error));
+  }, [applyAppSettings]);
+
+  useEffect(() => {
+    if (appSettings?.theme !== "auto") return;
+    const media = window.matchMedia("(prefers-color-scheme: dark)");
+    const update = (event: MediaQueryListEvent) => setIsDark(event.matches);
+    media.addEventListener("change", update);
+    return () => media.removeEventListener("change", update);
+  }, [appSettings?.theme]);
+
+  useEffect(() => {
+    if (!appSettings?.passwordHash || appSettings.autoLockPolicy === "never" || isLocked) return;
+    if (appSettings.autoLockPolicy === "immediately") {
+      const lockWhenHidden = () => {
+        if (document.visibilityState === "hidden") setIsLocked(true);
+      };
+      window.addEventListener("blur", lockWhenHidden);
+      document.addEventListener("visibilitychange", lockWhenHidden);
+      return () => {
+        window.removeEventListener("blur", lockWhenHidden);
+        document.removeEventListener("visibilitychange", lockWhenHidden);
+      };
+    }
+
+    const minutes = appSettings.autoLockPolicy === "minutes1" ? 1
+      : appSettings.autoLockPolicy === "minutes5" ? 5
+      : appSettings.autoLockPolicy === "minutes15" ? 15 : 30;
+    let timer = window.setTimeout(() => setIsLocked(true), minutes * 60_000);
+    const reset = () => {
+      window.clearTimeout(timer);
+      timer = window.setTimeout(() => setIsLocked(true), minutes * 60_000);
+    };
+    window.addEventListener("pointerdown", reset, { passive: true });
+    window.addEventListener("keydown", reset);
+    return () => {
+      window.clearTimeout(timer);
+      window.removeEventListener("pointerdown", reset);
+      window.removeEventListener("keydown", reset);
+    };
+  }, [appSettings?.autoLockPolicy, appSettings?.passwordHash, isLocked]);
+
+  const toggleTheme = useCallback(() => {
+    setIsDark((previous) => {
+      const next = !previous;
+      if (appSettings) {
+        const nextSettings: AppSettings = { ...appSettings, theme: next ? "dark" : "light" };
+        setAppSettings(nextSettings);
+        void invoke("save_settings", { settings: nextSettings }).catch((error) => console.error("Failed to save theme:", error));
+      }
+      return next;
+    });
+  }, [appSettings]);
 
   useEffect(() => {
     // Check if app is locked with password
@@ -383,6 +466,34 @@ function App() {
     }
   }
 
+  async function handleLegacyMigration() {
+    setLegacyMigrationBusy(true);
+    setLegacyMigrationError(null);
+    try {
+      const result = await invoke<LegacyMigrationResult>("migrate_legacy_data");
+      const loaded = await reloadAccounts();
+      setLegacyMigration(null);
+      setMigrationNotice({
+        title: t("migration.complete"),
+        lines: [
+          t("migration.completeSummary", {
+            accounts: result.accountCount,
+            conversations: result.conversationCount,
+            media: result.mediaFileCount,
+          }),
+          t("migration.sourcePreserved"),
+        ],
+      });
+      if (loaded.length > 0) {
+        setAccountsImportError(null);
+      }
+    } catch (error: unknown) {
+      setLegacyMigrationError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setLegacyMigrationBusy(false);
+    }
+  }
+
   async function loadSummaries(accountId: string): Promise<void> {
     const loaded = parseSummariesPayload(
       await invoke<string>("load_conversation_summaries", { accountId }),
@@ -402,13 +513,26 @@ function App() {
     return invoke<string>("enqueue_job", { req: payload });
   }
 
-  // On startup: load local accounts, auto-import from browser cookies if empty.
+  // On startup: offer a non-destructive Gemini Collector migration before
+  // falling back to browser account discovery.
   useEffect(() => {
     let cancelled = false;
 
     async function bootstrapAccounts() {
       try {
         let loaded = parseAccountsPayload(await invoke<string>("load_accounts"));
+        try {
+          const legacy = await invoke<LegacyMigrationInfo>("detect_legacy_data");
+          if (legacy.available) {
+            if (!cancelled) {
+              setAccounts(loaded);
+              setLegacyMigration(legacy);
+            }
+            return;
+          }
+        } catch (error) {
+          console.error("Failed to inspect Gemini Collector data:", error);
+        }
         if (loaded.length === 0) {
           try {
             if (IS_WINDOWS) {
@@ -778,7 +902,7 @@ function App() {
       const stats = parseAccountExportStatsPayload(
         await invoke<string>("get_account_export_stats", { accountId: currentAccount.id })
       );
-      if (!stats) throw new Error("读取导出统计失败");
+      if (!stats) throw new Error(t("app.readingStatsFailed"));
       setExportStats(stats);
       setExportTimeRange("all");
       setExportFormat("zip");
@@ -786,7 +910,7 @@ function App() {
       setExportRangeBytesCache(new Map([["all", stats.totalBytes]]));
       setShowExportModal(true);
     } catch (e) {
-      setExportNotice({ title: "读取统计失败", lines: [e instanceof Error ? e.message : String(e)] });
+      setExportNotice({ title: t("app.readingStatsFailed"), lines: [e instanceof Error ? e.message : String(e)] });
     } finally {
       setPreparingExportData(false);
     }
@@ -794,7 +918,7 @@ function App() {
 
   async function handleImport() {
     if (!currentAccount || importingAccountData || exportingAccountData || preparingExportData || clearingAccountData) return;
-    const selected = await open({ directory: false, multiple: false, title: "选择要导入的 ZIP 压缩包", filters: [{ name: "ZIP 压缩包", extensions: ["zip"] }] });
+    const selected = await open({ directory: false, multiple: false, title: t("app.chooseImportZip"), filters: [{ name: t("app.zipArchive"), extensions: ["zip"] }] });
     if (!selected) return;
     const zipPath = Array.isArray(selected) ? selected[0] : selected;
     if (!zipPath || typeof zipPath !== "string") return;
@@ -811,14 +935,14 @@ function App() {
       await reloadAccounts();
       await loadSummaries(accountId);
       setImportNotice({
-        title: "导入完成",
+        title: t("app.importComplete"),
         lines: [
-          `新增对话: ${impConv}，合并（已存在 ID）: ${mergedConv}`,
-          `新增媒体: ${impMedia}，已跳过（已存在）: ${skipMedia}`,
+          t("app.importConversations", { imported: impConv, merged: mergedConv }),
+          t("app.importMedia", { imported: impMedia, skipped: skipMedia }),
         ],
       });
     } catch (e) {
-      setImportNotice({ title: "导入失败", lines: [e instanceof Error ? e.message : String(e)] });
+      setImportNotice({ title: t("app.importFailed"), lines: [e instanceof Error ? e.message : String(e)] });
     } finally {
       setImportingAccountData(false);
     }
@@ -860,21 +984,21 @@ function App() {
         : new Date(Date.now() - (exportTimeRange === "3d" ? 3 : exportTimeRange === "7d" ? 7 : 30) * 86400_000).toISOString();
 
       if (exportFormat === "zip") {
-        const selectedOutput = await open({ directory: true, multiple: false, title: "选择导出目录" });
+        const selectedOutput = await open({ directory: true, multiple: false, title: t("app.chooseExportDirectory") });
         if (!selectedOutput) return;
         const outputDir = Array.isArray(selectedOutput) ? selectedOutput[0] : selectedOutput;
-        if (!outputDir || typeof outputDir !== "string") throw new Error("未选择有效导出目录");
+        if (!outputDir || typeof outputDir !== "string") throw new Error(t("app.invalidExportDirectory"));
         const result = parseAccountExportResultPayload(
           await invoke<string>("export_account_zip", { accountId, outputDir })
         );
-        if (!result) throw new Error("导出失败：返回结果异常");
+        if (!result) throw new Error(t("app.invalidExportResult"));
         try { await revealItemInDir(result.zipPath); } catch {}
-        setExportNotice({ title: "导出完成", lines: [`文件: ${result.fileName}`, `大小: ${formatBytes(result.zipSizeBytes)}`, `路径: ${result.zipPath}`] });
+        setExportNotice({ title: t("app.exportComplete"), lines: [t("app.file", { value: result.fileName }), t("app.size", { value: formatBytes(result.zipSizeBytes) }), t("app.path", { value: result.zipPath })] });
       } else {
-        const selectedOutput = await open({ directory: true, multiple: false, title: "选择导出目录" });
+        const selectedOutput = await open({ directory: true, multiple: false, title: t("app.chooseExportDirectory") });
         if (!selectedOutput) return;
         const outputDir = Array.isArray(selectedOutput) ? selectedOutput[0] : selectedOutput;
-        if (!outputDir || typeof outputDir !== "string") throw new Error("未选择有效导出目录");
+        if (!outputDir || typeof outputDir !== "string") throw new Error(t("app.invalidExportDirectory"));
         const ts = new Date().toISOString().replace(/[-:]/g, "").slice(0, 15);
         const outputPath = `${outputDir}/kelivo_${accountId}_${ts}.zip`;
         const isSplit = exportFormat === "kelivo-split";
@@ -883,13 +1007,13 @@ function App() {
           : await invoke<string>("export_account_kelivo", { accountId, outputPath, afterDate });
         try { await revealItemInDir(isSplit ? outputDir : outputPath); } catch {}
         setExportNotice({
-          title: isSplit ? "导出到 Kelivo（分包）完成" : "导出到 Kelivo 完成",
+          title: t(isSplit ? "app.exportKelivoSplitComplete" : "app.exportKelivoComplete"),
           lines: stdout.trim().split("\n").filter(Boolean),
         });
       }
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
-      setExportNotice({ title: "导出失败", lines: [msg] });
+      setExportNotice({ title: t("app.exportFailed"), lines: [msg] });
     } finally {
       const elapsed = Date.now() - startedAt;
       if (elapsed < 450) await new Promise(r => window.setTimeout(r, 450 - elapsed));
@@ -902,7 +1026,7 @@ function App() {
       return;
     }
     if (listSyncing || fullSyncing || syncingConversationIds.length > 0 || exportingAccountData || preparingExportData) {
-      window.alert("当前有任务进行中，暂时不能清空账号数据。请等待任务结束后重试。");
+      window.alert(t("app.taskBusy"));
       return;
     }
     setShowClearConfirm(true);
@@ -915,7 +1039,7 @@ function App() {
     }
     if (listSyncing || fullSyncing || syncingConversationIds.length > 0 || exportingAccountData || preparingExportData) {
       setShowClearConfirm(false);
-      window.alert("当前有任务进行中，暂时不能清空账号数据。请等待任务结束后重试。");
+      window.alert(t("app.taskBusy"));
       return;
     }
 
@@ -944,7 +1068,7 @@ function App() {
     } catch (e) {
       console.error("清空账号数据失败:", e);
       const msg = e instanceof Error ? e.message : String(e);
-      window.alert(`清空账号数据失败：${msg}`);
+      window.alert(t("app.clearFailed", { error: msg }));
     } finally {
       setClearingAccountData(false);
     }
@@ -1034,12 +1158,25 @@ function App() {
           importError={accountsImportError}
           onSelect={handleSelectAccount}
           isDark={isDark}
-          onToggleDark={() => setIsDark((v) => !v)}
+          onToggleDark={toggleTheme}
           onReload={handleReloadAccounts}
           reloading={reloadingAccounts}
+          onOpenSettings={() => setShowSettings(true)}
         />
         {showSettings && (
-          <SettingsModal onClose={() => setShowSettings(false)} />
+          <Suspense fallback={null}><SettingsModal onClose={() => setShowSettings(false)} initialSettings={appSettings} onSaved={applyAppSettings} /></Suspense>
+        )}
+        {legacyMigration && (
+          <LegacyMigrationModal
+            info={legacyMigration}
+            busy={legacyMigrationBusy}
+            error={legacyMigrationError}
+            onCancel={() => setLegacyMigration(null)}
+            onConfirm={() => void handleLegacyMigration()}
+          />
+        )}
+        {migrationNotice && (
+          <NoticeModal title={migrationNotice.title} lines={migrationNotice.lines} onClose={() => setMigrationNotice(null)} />
         )}
       </ThemeContext.Provider>
     );
@@ -1048,6 +1185,7 @@ function App() {
   return (
     <ThemeContext.Provider value={theme}>
       <div
+        className="app-shell"
         style={{
           display: "flex",
           height: "100vh",
@@ -1057,16 +1195,6 @@ function App() {
           position: "relative",
         }}
       >
-        <div
-          style={{
-            position: "absolute",
-            inset: 0,
-            pointerEvents: "none",
-            background: theme.isDark
-              ? "radial-gradient(940px 560px at 90% 8%, rgba(255,255,255,0.12), transparent 66%), radial-gradient(860px 540px at -6% 92%, rgba(255,255,255,0.08), transparent 62%), repeating-linear-gradient(128deg, rgba(255,255,255,0.03) 0 1px, transparent 1px 28px)"
-              : "radial-gradient(900px 520px at 89% 9%, rgba(126,181,255,0.3), transparent 67%), radial-gradient(860px 520px at -4% 91%, rgba(183,209,255,0.3), transparent 62%), linear-gradient(115deg, rgba(255,255,255,0.30) 0%, transparent 36%)",
-          }}
-        />
         <Sidebar
           conversations={visibleConversationSummaries}
           conversationSortMode={conversationSortMode}
@@ -1103,6 +1231,7 @@ function App() {
           syncingConversationIds={syncingConversationIds}
           onDeleteConversation={handleDeleteConversation}
           onMoveToFolder={handleMoveToFolder}
+          width={appSettings?.sidebarWidth ?? 280}
         />
         <div
           style={{
@@ -1122,7 +1251,7 @@ function App() {
             sidebarCollapsed={sidebarCollapsed}
             onToggleSidebar={() => setSidebarCollapsed((v) => !v)}
             isDark={isDark}
-            onToggleDark={() => setIsDark((v) => !v)}
+            onToggleDark={toggleTheme}
             disableLogout={anySyncTaskRunning}
             onLogout={() => {
               setCurrentAccount(null);
@@ -1149,7 +1278,9 @@ function App() {
             onOpenSettings={() => setShowSettings(true)}
           />
           <div id="chat-view-container" style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", overflow: "hidden", position: "relative" }}>
-            <ChatView conversation={selectedConversation} accountId={currentAccount?.id} mediaDir={mediaDir} mediaVersion={mediaVersion} scrollToMessageId={scrollToMessageId} onScrolledToMessage={handleScrolledToMessage} />
+            <Suspense fallback={<div style={{ flex: 1, display: "grid", placeItems: "center", color: theme.textMuted, fontSize: 13 }}>{t("common.loading")}</div>}>
+              <ChatView conversation={selectedConversation} accountId={currentAccount?.id} mediaDir={mediaDir} mediaVersion={mediaVersion} scrollToMessageId={scrollToMessageId} onScrolledToMessage={handleScrolledToMessage} />
+            </Suspense>
           </div>
         </div>
       </div>
@@ -1181,10 +1312,14 @@ function App() {
         <SyncOverlay importingAccountData={importingAccountData} preparingExportData={preparingExportData} />
       )}
       {showSettings && (
-        <SettingsModal 
-          onClose={() => setShowSettings(false)} 
-          accountId={currentAccount?.id}
-        />
+        <Suspense fallback={null}>
+          <SettingsModal
+            onClose={() => setShowSettings(false)}
+            accountId={currentAccount?.id}
+            initialSettings={appSettings}
+            onSaved={applyAppSettings}
+          />
+        </Suspense>
       )}
     </ThemeContext.Provider>
   );

@@ -282,6 +282,7 @@ impl GeminiExporter {
 }
 
 /// 落盘列表同步状态，返回 lost_count
+#[allow(clippy::too_many_arguments)] // Explicit sync checkpoint state keeps call sites auditable.
 fn persist_list_state(
     account_dir: &Path,
     account_id: &str,
@@ -607,7 +608,7 @@ impl GeminiExporter {
 
         let latest_update_ts = existing_summary
             .get("remoteHash")
-            .and_then(|v| coerce_epoch_seconds(v));
+            .and_then(coerce_epoch_seconds);
         let chat_info = json!({
             "id": conv_id,
             "title": existing_summary.get("title").and_then(|v| v.as_str()).unwrap_or(&bare_id),
@@ -816,6 +817,7 @@ impl GeminiExporter {
     }
 
     /// 全量模式同步单个会话
+    #[allow(clippy::too_many_arguments)] // Shared mutable sync state is intentionally explicit.
     async fn sync_conversation_full(
         &self,
         raw_turns: &[Value],
@@ -837,7 +839,7 @@ impl GeminiExporter {
 
         let mut parsed_turns: Vec<Value> = raw_turns
             .iter()
-            .map(|t| turn_parser::parse_turn_to_value(t))
+            .map(turn_parser::parse_turn_to_value)
             .collect();
         turn_parser::normalize_turn_media_first_seen_values(&mut parsed_turns);
 
@@ -893,6 +895,7 @@ impl GeminiExporter {
     }
 
     /// 增量模式同步单个会话
+    #[allow(clippy::too_many_arguments)] // Mirrors the full-sync state contract above.
     async fn sync_conversation_incremental(
         &self,
         raw_turns: &[Value],
@@ -926,7 +929,7 @@ impl GeminiExporter {
 
         let mut parsed_new_turns: Vec<Value> = raw_turns
             .iter()
-            .map(|t| turn_parser::parse_turn_to_value(t))
+            .map(turn_parser::parse_turn_to_value)
             .collect();
         turn_parser::normalize_turn_media_first_seen_values(&mut parsed_new_turns);
 

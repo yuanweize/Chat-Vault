@@ -4,8 +4,8 @@ set -euo pipefail
 PROJECT_DIR="$(cd "$(dirname "$0")" && pwd)"
 BUNDLE_DIR="$PROJECT_DIR/src-tauri/target/release/bundle"
 RELEASE_DIR="$PROJECT_DIR/release"
-APP_NAME="gemini-collector"
-APP_PATH="$BUNDLE_DIR/macos/$APP_NAME.app"
+PRODUCT_NAME="Chat Vault"
+APP_PATH="$BUNDLE_DIR/macos/$PRODUCT_NAME.app"
 
 # 确保 Cargo 在 PATH 中
 export PATH="$HOME/.cargo/bin:$PATH"
@@ -17,7 +17,7 @@ cleanup() {
     echo "[clean] 完成"
 }
 
-echo "=== Gemini Collector DMG 构建 ==="
+echo "=== Chat Vault DMG 构建 ==="
 echo "项目目录: $PROJECT_DIR"
 echo
 
@@ -37,7 +37,7 @@ mkdir -p "$RELEASE_DIR"
 
 VERSION="$(plutil -p "$APP_PATH/Contents/Info.plist" | grep CFBundleShortVersionString | awk -F'"' '{print $4}')"
 ARCH="$(uname -m)"
-DMG_NAME="${APP_NAME}_${VERSION}_${ARCH}.dmg"
+DMG_NAME="Chat-Vault_${VERSION}_${ARCH}.dmg"
 DMG_PATH="$RELEASE_DIR/$DMG_NAME"
 
 # ad-hoc 签名，避免 macOS 报 "damaged" 错误
@@ -50,7 +50,7 @@ cp -r "$APP_PATH" "$TMP_DMG_DIR/"
 ln -s /Applications "$TMP_DMG_DIR/Applications"
 
 hdiutil create \
-    -volname "$APP_NAME" \
+    -volname "$PRODUCT_NAME" \
     -srcfolder "$TMP_DMG_DIR" \
     -ov \
     -format UDZO \

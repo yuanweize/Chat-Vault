@@ -1009,13 +1009,16 @@ fn extract_canvas_list(ai_data: &Value) -> Vec<Canvas> {
 
         // 优先从 [8] 取 raw content (无 code fence)，fallback 到 [4]
         let content = vget(item, 8)
-            .and_then(|v| extract_canvas_raw_content(v))
+            .and_then(extract_canvas_raw_content)
             .or_else(|| {
                 // [4] 带 code fence，需要去掉
                 vstr(item, 4).map(|s| {
                     let trimmed = s.trim();
                     if trimmed.starts_with("```") {
-                        let without_first = trimmed.splitn(2, '\n').nth(1).unwrap_or(trimmed);
+                        let without_first = trimmed
+                            .split_once('\n')
+                            .map(|(_, content)| content)
+                            .unwrap_or(trimmed);
                         let without_last =
                             without_first.strip_suffix("```").unwrap_or(without_first);
                         without_last.trim().to_string()
@@ -1045,7 +1048,6 @@ fn extract_canvas_list(ai_data: &Value) -> Vec<Canvas> {
 }
 
 /// 解析单个对话轮次
-
 fn extract_turn_id_timestamp(arr: &[Value]) -> (Option<String>, Option<i64>, Option<String>) {
     let mut turn_id = None;
     let mut timestamp = None;
@@ -1072,7 +1074,10 @@ fn extract_turn_id_timestamp(arr: &[Value]) -> (Option<String>, Option<i64>, Opt
 }
 
 fn extract_user_content(arr: &[Value]) -> RoleContent {
-    let mut user = RoleContent { text: String::new(), files: Vec::new() };
+    let mut user = RoleContent {
+        text: String::new(),
+        files: Vec::new(),
+    };
     if arr.len() > 2 {
         let content = &arr[2];
         if let Some(msg) = vget(content, 0) {
@@ -1100,7 +1105,10 @@ pub fn parse_turn(turn: &Value) -> ParsedTurn {
         turn_id: None,
         timestamp: None,
         timestamp_iso: None,
-        user: RoleContent { text: String::new(), files: Vec::new() },
+        user: RoleContent {
+            text: String::new(),
+            files: Vec::new(),
+        },
         assistant: AssistantContent {
             text: String::new(),
             thinking: String::new(),
@@ -1277,7 +1285,6 @@ pub fn parse_turn(turn: &Value) -> ParsedTurn {
 
     result
 }
-
 
 // ============================================================================
 // 媒体身份键与堆叠去重

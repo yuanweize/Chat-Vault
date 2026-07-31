@@ -305,7 +305,7 @@ fn do_import(src_dir: &Path, target_dir: &Path) -> Result<String, String> {
             if target_path.exists() {
                 skipped_media += 1;
             } else {
-                std::fs::copy(&entry.path(), &target_path).str_err()?;
+                std::fs::copy(entry.path(), &target_path).str_err()?;
                 imported_media += 1;
             }
         }

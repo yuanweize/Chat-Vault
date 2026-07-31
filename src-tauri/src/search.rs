@@ -254,7 +254,7 @@ pub fn index_all(
     // 清理已删除的对话
     let removed: Vec<String> = mtimes
         .keys()
-        .filter(|id| !file_ids.contains(id.as_str()))
+        .filter(|id| !file_ids.contains(*id))
         .cloned()
         .collect();
     let deleted = removed.len();
@@ -432,7 +432,10 @@ pub fn search_messages(
     let searcher = reader.searcher();
 
     let top_docs = searcher
-        .search(&final_query, &TopDocs::with_limit(limit as usize))
+        .search(
+            &final_query,
+            &TopDocs::with_limit(limit as usize).order_by_score(),
+        )
         .map_err(|e| format!("搜索失败: {}", e))?;
 
     let query_lower = query_str.to_lowercase();

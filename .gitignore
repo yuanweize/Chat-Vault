@@ -22,8 +22,8 @@ dist-ssr
 *.sln
 *.sw?
 
-# Documentation (local only)
-docs/
+# Documentation scratch space (local only)
+docs/local/
 
 # Test data & sensitive user data
 .env.test

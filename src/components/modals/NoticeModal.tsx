@@ -1,63 +1,21 @@
+import { useTranslation } from "react-i18next";
 import { useTheme } from "../../theme";
+import { InfoIcon } from "../Icons";
 
-export interface NoticeModalProps {
-  title: string;
-  lines: string[];
-  onClose: () => void;
-}
-
-export function NoticeModal({ title, lines, onClose }: NoticeModalProps) {
+export function NoticeModal({ title, lines, onClose }: { title: string; lines: string[]; onClose: () => void }) {
   const theme = useTheme();
-  const clearDialogBg = theme.isDark ? "#171b22" : "#ffffff";
-  const clearDialogBorder = theme.isDark ? "rgba(255,255,255,0.14)" : "rgba(15,23,42,0.14)";
-
+  const { t } = useTranslation();
   return (
-    <div
-      style={{
-        position: "fixed",
-        inset: 0,
-        zIndex: 10001,
-        background: "rgba(0,0,0,0.32)",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-      }}
-    >
-      <div
-        style={{
-          width: 430,
-          maxWidth: "calc(100vw - 32px)",
-          borderRadius: 4,
-          background: clearDialogBg,
-          border: `2px solid ${clearDialogBorder}`,
-          padding: 16,
-        }}
-      >
-        <div style={{ fontSize: 15, fontWeight: 700, color: theme.text, marginBottom: 8 }}>
-          {title}
+    <div className="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="notice-title" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
+      <div className="modal-panel" style={{ background: theme.cardBg, borderColor: theme.border }}>
+        <div className="modal-body" style={{ padding: 22 }}>
+          <div style={{ width: 42, height: 42, borderRadius: 12, display: "grid", placeItems: "center", color: "var(--accent)", background: "var(--accent-soft)" }}><InfoIcon size={20} /></div>
+          <h2 id="notice-title" className="modal-title" style={{ marginTop: 15, color: theme.text }}>{title}</h2>
+          <div style={{ marginTop: 9, color: theme.textSub, fontSize: 12.5, lineHeight: 1.65 }}>
+            {lines.map((line, index) => <div key={`${index}-${line}`} style={{ overflowWrap: "anywhere" }}>{line}</div>)}
+          </div>
         </div>
-        <div style={{ fontSize: 12, color: theme.textSub, lineHeight: 1.6, marginBottom: 14 }}>
-          {lines.map((line, idx) => (
-            <div key={`${idx}_${line}`}>{line}</div>
-          ))}
-        </div>
-        <div style={{ display: "flex", justifyContent: "flex-end" }}>
-          <button
-            onClick={onClose}
-            style={{
-              border: "none",
-              background: "#0071e3",
-              color: "#fff",
-              borderRadius: 4,
-              padding: "7px 12px",
-              fontSize: 12,
-              fontWeight: 600,
-              cursor: "pointer",
-            }}
-          >
-            OK
-          </button>
-        </div>
+        <footer className="modal-footer" style={{ borderColor: theme.divider }}><button className="button-primary" onClick={onClose}>{t("common.ok")}</button></footer>
       </div>
     </div>
   );

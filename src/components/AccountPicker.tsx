@@ -1,10 +1,8 @@
-import React from "react";
-import { Account } from "../data/types";
+import { useTranslation } from "react-i18next";
+import type { Account } from "../data/types";
 import { useTheme } from "../theme";
 import { IS_WINDOWS } from "../utils/platform";
-import { hoverHandlers } from "../utils/hoverHandlers";
-import { SpinnerIcon, SunIcon, MoonIcon, SyncIcon } from "./Icons";
-import { useTranslation } from "react-i18next";
+import { ChevronRightIcon, MoonIcon, SettingsIcon, SpinnerIcon, SunIcon, SyncIcon } from "./Icons";
 
 interface AccountPickerProps {
   accounts: Account[];
@@ -15,174 +13,77 @@ interface AccountPickerProps {
   onToggleDark: () => void;
   onReload?: () => void;
   reloading?: boolean;
+  onOpenSettings?: () => void;
 }
 
-export function AccountPicker({ accounts, loading, importError, onSelect, isDark, onToggleDark, onReload, reloading }: AccountPickerProps) {
-  const tTheme = useTheme();
+export function AccountPicker({ accounts, loading, importError, onSelect, isDark, onToggleDark, onReload, reloading = false, onOpenSettings }: AccountPickerProps) {
+  const theme = useTheme();
   const { t } = useTranslation();
+  const busy = loading || reloading;
 
   return (
-    <div style={{ width: "100%", height: "100vh", background: tTheme.appBg, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", position: "relative" }}>
-      {/* Drag region for window */}
-      <div data-tauri-drag-region style={{ position: "absolute", top: 0, left: 0, right: 0, height: IS_WINDOWS ? 8 : 52 }} />
-
-      {/* Dark mode toggle */}
-      <button
-        onClick={onToggleDark}
-        title={isDark ? t("account.switchLight") : t("account.switchDark")}
-        style={{ position: "absolute", top: 14, right: 14, width: 28, height: 28, borderRadius: 4, border: `2px solid ${tTheme.border}`, background: tTheme.topBarBg, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", transition: "background 0.15s" }}
-        {...hoverHandlers(tTheme.btnHoverBg)}
-      >
-        {isDark ? <SunIcon color={tTheme.textSub} /> : <MoonIcon color={tTheme.textSub} />}
-      </button>
-
-      {/* App identity */}
-      <div style={{ textAlign: "center", marginBottom: 36 }}>
-        <div style={{ width: 56, height: 56, borderRadius: 8, background: "#3b82f6", display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 14px" }}>
-          <svg width="28" height="28" viewBox="0 0 24 24" fill="white"><path d="M12 2l2.4 7.4H22l-6.2 4.5 2.4 7.4L12 17l-6.2 4.3 2.4-7.4L2 9.4h7.6z" /></svg>
-        </div>
-        <div style={{ fontSize: 22, fontWeight: 800, color: tTheme.text, letterSpacing: -0.5 }}>Chat Vault</div>
-        <div style={{ fontSize: 13, color: tTheme.textSub, marginTop: 4, fontWeight: 500 }}>{t("account.selectAccount")}</div>
-      </div>
-
-      {/* Reload icon — right above the card */}
-      {onReload && (
-        <button
-          onClick={onReload}
-          disabled={reloading || loading}
-          title={t("account.redetect")}
-          style={{ marginBottom: 6, background: "transparent", border: "none", cursor: reloading || loading ? "default" : "pointer", padding: 6, borderRadius: 4, display: "flex", alignItems: "center", justifyContent: "center", opacity: reloading || loading ? 0.4 : 0.7, transition: "opacity 0.15s" }}
-          onMouseEnter={(e) => { if (!reloading && !loading) (e.currentTarget as HTMLElement).style.opacity = "1"; }}
-          onMouseLeave={(e) => { if (!reloading && !loading) (e.currentTarget as HTMLElement).style.opacity = "0.7"; }}
-        >
-          <SyncIcon spinning={!!reloading} color={tTheme.textSub} />
+    <div className="account-picker-shell" style={{ background: theme.appBg }}>
+      <div data-tauri-drag-region style={{ position: "absolute", inset: "0 0 auto", height: IS_WINDOWS ? 8 : 52, zIndex: 2 }} />
+      <div style={{ position: "absolute", top: 14, right: 14, zIndex: 3, display: "flex", gap: 4 }}>
+        {onOpenSettings && <button className="icon-button" onClick={onOpenSettings} aria-label={t("settings.title")} title={t("settings.title")} style={{ color: theme.textSub }}><SettingsIcon size={17} /></button>}
+        <button className="icon-button" onClick={onToggleDark} aria-label={isDark ? t("account.switchLight") : t("account.switchDark")} title={isDark ? t("account.switchLight") : t("account.switchDark")} style={{ color: theme.textSub }}>
+          {isDark ? <SunIcon size={17} /> : <MoonIcon size={17} />}
         </button>
-      )}
-
-      {/* Content area */}
-      <div style={{ width: 360, background: tTheme.cardBg, borderRadius: 8, border: `2px solid ${tTheme.border}`, overflow: "hidden", minHeight: 64 }}>
-        {loading ? (
-          /* Loading state */
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "center", padding: 32 }}>
-            <SpinnerIcon color={tTheme.textMuted} />
-          </div>
-        ) : accounts.length === 0 ? (
-          /* No accounts */
-          <div style={{ display: "flex", flexDirection: "column", alignItems: "center", padding: "28px 24px" }}>
-            <div style={{ fontSize: 13, color: tTheme.textSub, textAlign: "center", lineHeight: 1.6, fontWeight: 500 }}>
-              {IS_WINDOWS ? (<>
-                {t("account.noLocalAccount")}<br />
-                {t("account.loginGoogle")}
-              </>) : (<>
-                {t("account.noLocalAccount")}<br />
-                {t("account.autoTriedBrowser")}<br />
-                {t("account.confirmGeminiLogin")}
-              </>)}
-            </div>
-            {IS_WINDOWS && onReload && (
-              <button
-                onClick={onReload}
-                disabled={reloading || loading}
-                style={{
-                  marginTop: 18,
-                  padding: "10px 28px",
-                  borderRadius: 4,
-                  border: "none",
-                  background: "#3b82f6",
-                  color: "#fff",
-                  fontSize: 14,
-                  fontWeight: 600,
-                  cursor: reloading || loading ? "default" : "pointer",
-                  opacity: reloading || loading ? 0.6 : 1,
-                  transition: "opacity 0.15s, background 0.15s",
-                }}
-              >
-                {reloading ? t("account.waitingLogin") : t("account.loginGoogleBtn")}
-              </button>
-            )}
-            {importError && (
-              <div style={{
-                marginTop: 16,
-                width: "100%",
-                padding: "12px 14px",
-                borderRadius: 4,
-                background: tTheme.isDark ? "#7f1d1d" : "#fee2e2",
-                border: `2px solid ${tTheme.isDark ? "#b91c1c" : "#f87171"}`,
-              }}>
-                <div style={{ fontSize: 12, fontWeight: 700, color: tTheme.isDark ? "#fca5a5" : "#b91c1c", marginBottom: 6 }}>
-                  {t("account.diagnosticInfo")}
-                </div>
-                <pre style={{
-                  fontSize: 11,
-                  lineHeight: 1.5,
-                  color: tTheme.isDark ? "#fca5a5" : "#991b1b",
-                  margin: 0,
-                  whiteSpace: "pre-wrap",
-                  wordBreak: "break-all",
-                  maxHeight: 200,
-                  overflowY: "auto",
-                  fontFamily: "ui-monospace, 'SF Mono', Menlo, monospace",
-                }}>
-                  {importError}
-                </pre>
-              </div>
-            )}
-          </div>
-        ) : (
-          /* Account list */
-          accounts.map((account, i) => (
-            <AccountRow
-              key={account.id}
-              account={account}
-              showDivider={i < accounts.length - 1}
-              onClick={() => onSelect(account)}
-            />
-          ))
-        )}
       </div>
-    </div>
-  );
-}
 
-function AccountRow({ account, showDivider, onClick }: { account: Account; showDivider: boolean; onClick: () => void }) {
-  const tTheme = useTheme();
-  const { t } = useTranslation();
-  const [hovered, setHovered] = React.useState(false);
+      <main className="account-picker-content">
+        <div className="brand-lockup">
+          <img className="brand-icon" src="/app-icon.png?v=3.0.0" alt="" />
+          <div className="brand-name" style={{ color: theme.text }}>Chat Vault</div>
+          <div className="brand-tagline" style={{ color: theme.textSub }}>{t("account.selectAccountDesc")}</div>
+        </div>
 
-  return (
-    <div
-      onClick={onClick}
-      onMouseEnter={() => setHovered(true)}
-      onMouseLeave={() => setHovered(false)}
-      style={{ padding: "13px 18px", display: "flex", alignItems: "center", gap: 12, cursor: "pointer", borderBottom: showDivider ? `2px solid ${tTheme.border}` : "none", background: hovered ? tTheme.hover : "transparent", transition: "background 0.12s" }}
-    >
-      <div style={{ width: 36, height: 36, borderRadius: 4, background: account.avatarColor, display: "flex", alignItems: "center", justifyContent: "center", color: "#fff", fontWeight: 700, fontSize: 15, flexShrink: 0 }}>
-        {account.avatarText}
-      </div>
-      <div style={{ flex: 1, overflow: "hidden" }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-          <div style={{ fontSize: 14, fontWeight: 700, color: tTheme.text, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{account.name}</div>
-          {account.listSyncPending && (
-            <span
-              title={t("account.syncIncomplete")}
-              style={{
-                width: 8,
-                height: 8,
-                borderRadius: 4,
-                background: "#ef4444",
-                flexShrink: 0,
-              }}
-            />
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", margin: "0 2px 9px" }}>
+          <h1 style={{ margin: 0, color: theme.text, fontSize: 14, fontWeight: 720 }}>{t("account.selectAccount")}</h1>
+          {onReload && (
+            <button className="icon-button" onClick={onReload} disabled={busy} aria-label={t("account.redetect")} title={t("account.redetect")} style={{ width: 30, height: 30, color: theme.textSub }}>
+              <SyncIcon spinning={reloading} size={16} />
+            </button>
           )}
         </div>
-        <div style={{ fontSize: 12, fontWeight: 500, color: tTheme.textSub, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", marginTop: 1 }}>{account.email}</div>
-      </div>
-      <div style={{ textAlign: "right", flexShrink: 0 }}>
-        <div style={{ fontSize: 12, fontWeight: 600, color: tTheme.textMuted }}>{t("account.conversations", { count: account.conversationCount })}</div>
-        <div style={{ fontSize: 11, fontWeight: 500, color: tTheme.textMuted, marginTop: 1 }}>{account.lastSyncAt ? account.lastSyncAt.slice(0, 10) : t("account.syncNotDone")}</div>
-      </div>
-      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke={tTheme.textMuted} strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><polyline points="9 18 15 12 9 6" /></svg>
+
+        <section className="account-card" aria-busy={busy} style={{ background: theme.cardBg, borderColor: theme.border }}>
+          {busy ? (
+            <div style={{ minHeight: 118, display: "grid", placeItems: "center", color: theme.textMuted }}><SpinnerIcon size={22} /></div>
+          ) : accounts.length === 0 ? (
+            <div style={{ padding: "30px 26px", textAlign: "center" }}>
+              <div style={{ color: theme.text, fontSize: 14, fontWeight: 700 }}>{t("account.noLocalAccount")}</div>
+              <p style={{ margin: "8px 0 0", color: theme.textSub, fontSize: 12.5, lineHeight: 1.6 }}>
+                {IS_WINDOWS ? t("account.loginGoogle") : <>{t("account.autoTriedBrowser")}<br />{t("account.confirmGeminiLogin")}</>}
+              </p>
+              {IS_WINDOWS && onReload && <button className="button-primary" onClick={onReload} style={{ marginTop: 18 }}>{t("account.loginGoogleBtn")}</button>}
+            </div>
+          ) : accounts.map((account) => (
+            <button className="account-row" key={account.id} onClick={() => onSelect(account)} style={{ color: theme.text, borderColor: theme.divider }}>
+              <span className="avatar" style={{ width: 42, height: 42, background: account.avatarColor }}>{account.avatarText}</span>
+              <span style={{ minWidth: 0 }}>
+                <span style={{ display: "flex", alignItems: "center", gap: 7 }}>
+                  <span style={{ overflow: "hidden", fontSize: 13.5, fontWeight: 700, textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{account.name}</span>
+                  {account.listSyncPending && <span className="status-dot" title={t("account.syncIncomplete")} />}
+                </span>
+                <span style={{ display: "block", marginTop: 3, overflow: "hidden", color: theme.textSub, fontSize: 11.5, textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{account.email}</span>
+              </span>
+              <span style={{ textAlign: "right", whiteSpace: "nowrap" }}>
+                <span style={{ display: "block", color: theme.textSub, fontSize: 11.5, fontWeight: 650 }}>{t("account.conversations", { count: account.conversationCount })}</span>
+                <span style={{ display: "block", marginTop: 3, color: theme.textMuted, fontSize: 10.5 }}>{account.lastSyncAt ? account.lastSyncAt.slice(0, 10) : t("account.syncNotDone")}</span>
+              </span>
+              <ChevronRightIcon size={15} color={theme.textMuted} />
+            </button>
+          ))}
+        </section>
+
+        {importError && !busy && (
+          <details style={{ marginTop: 12, padding: "11px 13px", border: `1px solid color-mix(in srgb, var(--danger) 35%, transparent)`, borderRadius: 12, color: "var(--danger)", background: "color-mix(in srgb, var(--danger) 7%, transparent)", fontSize: 11.5 }}>
+            <summary style={{ cursor: "pointer", fontWeight: 700 }}>{t("account.diagnosticInfo")}</summary>
+            <pre style={{ maxHeight: 160, margin: "9px 0 0", overflow: "auto", whiteSpace: "pre-wrap", wordBreak: "break-word", fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace", fontSize: 10.5, lineHeight: 1.5 }}>{importError}</pre>
+          </details>
+        )}
+      </main>
     </div>
   );
 }
-

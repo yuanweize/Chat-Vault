@@ -179,19 +179,16 @@ impl GeminiExporter {
         let email = user_spec.to_lowercase();
 
         // 优先走 ListAccounts 映射
-        match list_accounts::discover_email_authuser_mapping(&self.cookies).await {
-            Ok(mappings) => {
-                for item in &mappings {
-                    if item.email == email {
-                        if let Some(ref au) = item.authuser {
-                            self.authuser = Some(au.clone());
-                            log::info!("  authuser: {} (ListAccounts 映射)", au);
-                            return Ok(());
-                        }
+        if let Ok(mappings) = list_accounts::discover_email_authuser_mapping(&self.cookies).await {
+            for item in &mappings {
+                if item.email == email {
+                    if let Some(ref au) = item.authuser {
+                        self.authuser = Some(au.clone());
+                        log::info!("  authuser: {} (ListAccounts 映射)", au);
+                        return Ok(());
                     }
                 }
             }
-            Err(_) => {}
         }
 
         // 尝试通过页面内容匹配
@@ -400,12 +397,7 @@ impl GeminiExporter {
         let result = self.batchexecute("hNvQHb", &payload, &source_path).await?;
 
         let mut current_result = result;
-        loop {
-            let arr = match current_result.as_array() {
-                Some(a) => a,
-                None => break,
-            };
-
+        while let Some(arr) = current_result.as_array() {
             let turns = arr
                 .first()
                 .and_then(|v| v.as_array())

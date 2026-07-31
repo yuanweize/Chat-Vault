@@ -121,17 +121,27 @@ impl GeminiExporter {
                     .headers(headers.clone())
                     .send()
                     .await;
-                
+
                 match &r {
                     Ok(res) if res.status().is_server_error() => {
-                        log::warn!("[media-retry] 5xx 服务端错误 {}, 第 {}/3 次重试 | {}", res.status(), attempt, current_url);
+                        log::warn!(
+                            "[media-retry] 5xx 服务端错误 {}, 第 {}/3 次重试 | {}",
+                            res.status(),
+                            attempt,
+                            current_url
+                        );
                     }
                     Ok(_) => {
                         resp_result = Some(r);
                         break;
                     }
                     Err(e) => {
-                        log::warn!("[media-retry] 网络波动 {}, 第 {}/3 次重试 | {}", e, attempt, current_url);
+                        log::warn!(
+                            "[media-retry] 网络波动 {}, 第 {}/3 次重试 | {}",
+                            e,
+                            attempt,
+                            current_url
+                        );
                     }
                 }
 

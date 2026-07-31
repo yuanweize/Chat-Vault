@@ -130,7 +130,7 @@ impl WorkerHost {
 
         #[cfg(not(target_os = "windows"))]
         {
-            let cookies = tokio::task::spawn_blocking(|| cookies::get_cookies_from_local_browser())
+            let cookies = tokio::task::spawn_blocking(cookies::get_cookies_from_local_browser)
                 .await
                 .map_err(|e| format!("cookies 读取任务失败: {}", e))?
                 .map_err(|e| format!("cookies 读取失败: {}", e))?;

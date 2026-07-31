@@ -92,16 +92,6 @@ impl SyncScheduler {
             }
         });
     }
-
-    /// 请求停止调度器
-    pub fn stop(&self) {
-        self.stop_requested.store(true, Ordering::SeqCst);
-    }
-
-    /// 是否正在同步
-    pub fn is_syncing(&self) -> bool {
-        self.is_syncing.load(Ordering::SeqCst)
-    }
 }
 
 /// 触发自动同步所有配置的账号

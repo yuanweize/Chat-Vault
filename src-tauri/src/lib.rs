@@ -4,6 +4,7 @@ mod export;
 mod export_md;
 pub mod gemini_api;
 mod import;
+mod legacy_migration;
 pub mod media;
 pub mod protocol;
 mod scheduler;
@@ -22,6 +23,25 @@ use worker_host::EnqueueJobRequest;
 
 use export::{resolve_account_id_arg, value_to_non_empty_string};
 use str_err::ToStringErr;
+
+fn clear_legacy_webview_cache_once(app: &tauri::App, data_dir: &Path) {
+    const MARKER: &str = ".webview-cache-v3-cleared";
+    let marker = data_dir.join(MARKER);
+    if marker.exists() {
+        return;
+    }
+    let Some(window) = app.get_webview_window("main") else {
+        return;
+    };
+    match window.clear_all_browsing_data() {
+        Ok(()) => {
+            if let Err(error) = std::fs::write(&marker, b"cleared\n") {
+                log::warn!("Could not persist the WebView cache marker: {error}");
+            }
+        }
+        Err(error) => log::warn!("Could not clear the legacy WebView cache: {error}"),
+    }
+}
 
 fn read_account_registry_entry(
     data_dir: &Path,
@@ -720,7 +740,7 @@ async fn run_accounts_import(app: tauri::AppHandle) -> Result<String, String> {
     let data_dir = app.path().app_data_dir().str_err()?;
 
     // 读取浏览器 cookies
-    let all_cookies = tokio::task::spawn_blocking(|| cookies::get_cookies_from_local_browser())
+    let all_cookies = tokio::task::spawn_blocking(cookies::get_cookies_from_local_browser)
         .await
         .map_err(|e| format!("cookies 读取任务失败: {}", e))?
         .map_err(|e| format!("cookies 读取失败: {}", e))?;
@@ -786,7 +806,7 @@ async fn run_accounts_import(app: tauri::AppHandle) -> Result<String, String> {
 async fn reload_accounts_import(app: tauri::AppHandle) -> Result<String, String> {
     let data_dir = app.path().app_data_dir().str_err()?;
 
-    let all_cookies = tokio::task::spawn_blocking(|| cookies::get_cookies_from_local_browser())
+    let all_cookies = tokio::task::spawn_blocking(cookies::get_cookies_from_local_browser)
         .await
         .map_err(|e| format!("cookies 读取任务失败: {}", e))?
         .map_err(|e| format!("cookies 读取失败: {}", e))?;
@@ -1298,9 +1318,14 @@ pub fn run() {
             let app_handle = app.handle().clone();
             let output_dir = app_handle.path().app_data_dir()?;
 
+            // v3 replaced all static branding and UI bundles. Clear stale
+            // WebView assets once; persistent app settings live in Rust and
+            // are re-applied immediately after the page loads.
+            clear_legacy_webview_cache_once(app, &output_dir);
+
             // 初始化 worker host
             worker_host::init_worker_host(app_handle.clone(), output_dir.clone())
-                .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+                .map_err(std::io::Error::other)?;
 
             // 加载设置并配置后台行为
             let app_settings = settings::AppSettings::load(&output_dir);
@@ -1314,13 +1339,40 @@ pub fn run() {
 
             // 构建系统托盘菜单
             use tauri::menu::{MenuBuilder, MenuItemBuilder};
-            use tauri::tray::TrayIconBuilder;
-
-            let show_window = MenuItemBuilder::with_id("show_window", "显示主窗口").build(app)?;
-            let sync_all = MenuItemBuilder::with_id("sync_all", "立即同步所有账号").build(app)?;
-            let open_settings = MenuItemBuilder::with_id("open_settings", "设置").build(app)?;
+            let english = app_settings.language.starts_with("en");
+            let show_window = MenuItemBuilder::with_id(
+                "show_window",
+                if english {
+                    "Show Chat Vault"
+                } else {
+                    "显示主窗口"
+                },
+            )
+            .build(app)?;
+            let sync_all = MenuItemBuilder::with_id(
+                "sync_all",
+                if english {
+                    "Sync All Accounts"
+                } else {
+                    "立即同步所有账号"
+                },
+            )
+            .build(app)?;
+            let open_settings = MenuItemBuilder::with_id(
+                "open_settings",
+                if english { "Settings" } else { "设置" },
+            )
+            .build(app)?;
             let separator = tauri::menu::PredefinedMenuItem::separator(app)?;
-            let quit = MenuItemBuilder::with_id("quit", "退出 Chat Vault").build(app)?;
+            let quit = MenuItemBuilder::with_id(
+                "quit",
+                if english {
+                    "Quit Chat Vault"
+                } else {
+                    "退出 Chat Vault"
+                },
+            )
+            .build(app)?;
 
             let tray_menu = MenuBuilder::new(app)
                 .item(&show_window)
@@ -1363,7 +1415,6 @@ pub fn run() {
             sync_scheduler.start(app_handle.clone());
             log::info!("后台同步调度器已启动");
 
-
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -1379,6 +1430,8 @@ pub fn run() {
             export::export_account_kelivo,
             export::export_account_kelivo_split,
             import::import_account_zip,
+            legacy_migration::detect_legacy_data,
+            legacy_migration::migrate_legacy_data,
             clear_account_data,
             delete_conversation,
             clear_conversation_data,
@@ -1405,28 +1458,25 @@ pub fn run() {
         .expect("error while building tauri application");
 
     app.run(|app, event| {
-        match event {
-            tauri::RunEvent::ExitRequested { api, .. } => {
-                // 检查设置：如果启用后台运行，阻止退出，改为隐藏窗口
-                let data_dir = match app.path().app_data_dir() {
-                    Ok(d) => d,
-                    Err(_) => {
-                        worker_host::shutdown_worker_host();
-                        return;
-                    }
-                };
-                let app_settings = settings::AppSettings::load(&data_dir);
-                if app_settings.run_in_background {
-                    api.prevent_exit();
-                    // 隐藏所有窗口
-                    if let Some(window) = app.get_webview_window("main") {
-                        let _ = window.hide();
-                    }
-                } else {
+        if let tauri::RunEvent::ExitRequested { api, .. } = event {
+            // 检查设置：如果启用后台运行，阻止退出，改为隐藏窗口
+            let data_dir = match app.path().app_data_dir() {
+                Ok(d) => d,
+                Err(_) => {
                     worker_host::shutdown_worker_host();
+                    return;
                 }
+            };
+            let app_settings = settings::AppSettings::load(&data_dir);
+            if app_settings.run_in_background {
+                api.prevent_exit();
+                // 隐藏所有窗口
+                if let Some(window) = app.get_webview_window("main") {
+                    let _ = window.hide();
+                }
+            } else {
+                worker_host::shutdown_worker_host();
             }
-            _ => {}
         }
     });
 }

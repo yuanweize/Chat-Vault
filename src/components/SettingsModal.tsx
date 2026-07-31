@@ -1,378 +1,309 @@
-import React, { useState, useEffect } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { useTranslation } from "react-i18next";
+import type { AppSettings } from "../data/settings";
+import { normalizeSettings } from "../data/settings";
 import { useTheme } from "../theme";
-import { hoverHandlers } from "../utils/hoverHandlers";
-import { exportAllToZip } from "../utils/exportUtils";
+import { openExportDirectory } from "../utils/exportUtils";
+import {
+  AppWindowIcon,
+  AppearanceIcon,
+  CloseIcon,
+  InfoIcon,
+  LockIcon,
+  SettingsIcon,
+  StorageIcon,
+  SyncIcon,
+} from "./Icons";
 
-interface AppSettings {
-  syncInterval: string | { custom: number };
-  syncOnStartup: boolean;
-  showSyncNotification: boolean;
-  syncAccountIds: string[];
-  autoSyncEnabled: boolean;
-  customDataDirectory: string;
-  defaultExportFormat: string;
-  runInBackground: boolean;
-  hideDockIcon: boolean;
-  startOnLogin: boolean;
-  passwordHash: string;
-  autoLockPolicy: string;
-  theme: string;
-  language: string;
-  sidebarWidth: number;
-}
+type TabId = "sync" | "storage" | "run" | "security" | "appearance" | "about";
 
 interface SettingsModalProps {
   onClose: () => void;
+  accountId?: string;
+  initialSettings?: AppSettings | null;
+  onSaved?: (settings: AppSettings) => void;
 }
 
-export function SettingsModal({ onClose, accountId }: SettingsModalProps & { accountId?: string }) {
+export function SettingsModal({ onClose, accountId, initialSettings, onSaved }: SettingsModalProps) {
   const theme = useTheme();
   const { t, i18n } = useTranslation();
-  const [settings, setSettings] = useState<AppSettings | null>(null);
+  const [settings, setSettings] = useState<AppSettings | null>(initialSettings ?? null);
   const [saving, setSaving] = useState(false);
-  const [activeTab, setActiveTab] = useState("sync");
+  const [activeTab, setActiveTab] = useState<TabId>("sync");
+  const [loadError, setLoadError] = useState("");
+  const [passwordForm, setPasswordForm] = useState({ current: "", next: "", confirm: "" });
+  const [passwordBusy, setPasswordBusy] = useState(false);
+  const [passwordMessage, setPasswordMessage] = useState<{ kind: "success" | "error"; text: string } | null>(null);
 
-  // Load settings on mount
   useEffect(() => {
+    if (initialSettings) {
+      setSettings(normalizeSettings(initialSettings));
+      return;
+    }
     invoke<AppSettings>("load_settings")
-      .then(setSettings)
-      .catch(err => console.error("Failed to load settings", err));
-  }, []);
+      .then((value) => setSettings(normalizeSettings(value)))
+      .catch((error) => setLoadError(String(error)));
+  }, [initialSettings]);
+
+  useEffect(() => {
+    const handleKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape" && !saving && !passwordBusy) onClose();
+    };
+    window.addEventListener("keydown", handleKey);
+    return () => window.removeEventListener("keydown", handleKey);
+  }, [onClose, passwordBusy, saving]);
+
+  const navItems = useMemo(() => [
+    { id: "sync" as const, label: t("settings.sync"), icon: SyncIcon },
+    { id: "storage" as const, label: t("settings.data"), icon: StorageIcon },
+    { id: "run" as const, label: t("settings.app"), icon: AppWindowIcon },
+    { id: "security" as const, label: t("settings.security"), icon: LockIcon },
+    { id: "appearance" as const, label: t("settings.appearance"), icon: AppearanceIcon },
+    { id: "about" as const, label: t("settings.about"), icon: InfoIcon },
+  ], [t]);
+
+  const updateSetting = <K extends keyof AppSettings>(key: K, value: AppSettings[K]) => {
+    setSettings((previous) => previous ? { ...previous, [key]: value } : previous);
+  };
 
   const handleSave = async () => {
-    if (!settings) return;
+    if (!settings || saving) return;
     setSaving(true);
+    setLoadError("");
     try {
-      await invoke("save_settings", { settings });
+      const normalized = normalizeSettings(settings);
+      await invoke("save_settings", { settings: normalized });
+      onSaved?.(normalized);
       onClose();
-    } catch (err) {
-      console.error("Failed to save settings", err);
-      alert("保存失败: " + err);
+    } catch (error) {
+      setLoadError(`${t("settings.saveFailed")}: ${String(error)}`);
     } finally {
       setSaving(false);
     }
   };
 
-  const updateSetting = <K extends keyof AppSettings>(key: K, value: AppSettings[K]) => {
-    setSettings(prev => prev ? { ...prev, [key]: value } : null);
+  const refreshSettings = async () => {
+    const refreshed = normalizeSettings(await invoke<AppSettings>("load_settings"));
+    setSettings(refreshed);
+    onSaved?.(refreshed);
   };
 
-  if (!settings) return null;
+  const updatePassword = async (remove = false) => {
+    if (!settings || passwordBusy) return;
+    setPasswordMessage(null);
+    if (!remove && passwordForm.next.length < 8) {
+      setPasswordMessage({ kind: "error", text: t("settings.passwordTooShort") });
+      return;
+    }
+    if (!remove && passwordForm.next !== passwordForm.confirm) {
+      setPasswordMessage({ kind: "error", text: t("settings.passwordMismatch") });
+      return;
+    }
+    setPasswordBusy(true);
+    try {
+      await invoke("set_password", {
+        currentPassword: passwordForm.current,
+        newPassword: remove ? "" : passwordForm.next,
+      });
+      await refreshSettings();
+      setPasswordForm({ current: "", next: "", confirm: "" });
+      setPasswordMessage({ kind: "success", text: t(remove ? "settings.passwordRemoved" : "settings.passwordUpdated") });
+    } catch (error) {
+      const raw = String(error);
+      setPasswordMessage({
+        kind: "error",
+        text: raw.includes("CURRENT_PASSWORD_INVALID") ? t("settings.currentPasswordInvalid") : raw,
+      });
+    } finally {
+      setPasswordBusy(false);
+    }
+  };
+
+  const panelStyle = { background: theme.cardBg, borderColor: theme.border };
+  const subtleStyle = { color: theme.textSub };
+  const groupStyle = { background: theme.cardBg, borderColor: theme.border };
+  const rowStyle = { borderColor: theme.divider };
+  const fieldStyle = { color: theme.text, background: theme.sidebarBg, borderColor: theme.border };
 
   return (
-    <div style={{
-      position: "fixed",
-      top: 0, left: 0, right: 0, bottom: 0,
-      background: "rgba(0, 0, 0, 0.7)",
-      display: "flex",
-      alignItems: "center",
-      justifyContent: "center",
-      zIndex: 1000,
-    }}>
-      <div style={{
-        width: 700,
-        height: 500,
-        background: theme.sidebarBg,
-        borderRadius: 8,
-        display: "flex",
-        flexDirection: "column",
-        overflow: "hidden",
-        border: `2px solid ${theme.border}`,
-      }}>
-        {/* Header */}
-        <div style={{
-          padding: "16px 20px",
-          borderBottom: `1px solid ${theme.border}`,
-          display: "flex",
-          justifyContent: "space-between",
-          alignItems: "center",
-          background: theme.topBarBg,
-        }}>
-          <h2 style={{ margin: 0, fontSize: 18, color: theme.text, fontWeight: 700 }}>{t('settings.title')}</h2>
-          <button onClick={onClose} style={{
-            background: "none", border: "none", color: theme.textSub, fontSize: 20, cursor: "pointer"
-          }}>&times;</button>
-        </div>
-
-        {/* Body */}
-        <div style={{ display: "flex", flex: 1, overflow: "hidden" }}>
-          {/* Sidebar */}
-          <div style={{
-            width: 160,
-            borderRight: `1px solid ${theme.border}`,
-            background: theme.topBarBg,
-            display: "flex",
-            flexDirection: "column",
-            padding: "10px 0",
-          }}>
-            {[
-              { id: "sync", label: t('settings.sync') },
-              { id: "storage", label: t('settings.data') },
-              { id: "run", label: t('settings.app') },
-              { id: "security", label: t('settings.security') },
-              { id: "appearance", label: "🎨 外观/Appearance" },
-              { id: "about", label: t('settings.about') },
-            ].map(tab => (
-              <div
-                key={tab.id}
-                onClick={() => setActiveTab(tab.id)}
-                style={{
-                  padding: "10px 20px",
-                  cursor: "pointer",
-                  color: activeTab === tab.id ? theme.text : theme.textSub,
-                  background: activeTab === tab.id ? theme.hover : "transparent",
-                  fontWeight: activeTab === tab.id ? 600 : 400,
-                }}
-                {...hoverHandlers(theme.hover)}
-              >
-                {tab.label}
-              </div>
-            ))}
+    <div
+      className="modal-backdrop"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="settings-title"
+      onMouseDown={(event) => { if (event.target === event.currentTarget && !saving && !passwordBusy) onClose(); }}
+    >
+      <div className="modal-panel settings-panel" style={panelStyle}>
+        <header className="modal-header" style={{ borderColor: theme.divider }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+            <div style={{ width: 34, height: 34, borderRadius: 10, display: "grid", placeItems: "center", color: "var(--accent)", background: "var(--accent-soft)" }}>
+              <SettingsIcon size={18} />
+            </div>
+            <div>
+              <h2 id="settings-title" className="modal-title" style={{ color: theme.text }}>{t("settings.title")}</h2>
+              <div className="modal-subtitle" style={subtleStyle}>{t("settings.subtitle")}</div>
+            </div>
           </div>
+          <button className="icon-button" onClick={onClose} aria-label={t("common.close")} style={{ color: theme.textSub }}>
+            <CloseIcon size={18} />
+          </button>
+        </header>
 
-          {/* Content */}
-          <div style={{ flex: 1, padding: 24, overflowY: "auto", color: theme.text }}>
-            
-            {activeTab === "sync" && (
-              <div style={sectionStyle}>
-                <h3 style={{fontWeight: 700}}>{t('settings.syncSettings', '同步设置')}</h3>
-                <label style={rowStyle}>
-                  <span style={{fontWeight: 600}}>{t('settings.autoSync', '启用自动同步')}</span>
-                  <input type="checkbox" checked={settings.autoSyncEnabled} onChange={e => updateSetting("autoSyncEnabled", e.target.checked)} />
-                </label>
-                <label style={rowStyle}>
-                  <span style={{fontWeight: 600}}>{t('settings.syncOnStartup', '启动时自动同步')}</span>
-                  <input type="checkbox" checked={settings.syncOnStartup} onChange={e => updateSetting("syncOnStartup", e.target.checked)} />
-                </label>
-                <label style={rowStyle}>
-                  <span style={{fontWeight: 600}}>{t('settings.syncInterval', '同步间隔')}</span>
-                  <select 
-                    value={typeof settings.syncInterval === 'string' ? settings.syncInterval : 'custom'} 
-                    onChange={e => updateSetting("syncInterval", e.target.value)}
-                    style={inputStyle(t)}
-                  >
-                    <option value="minutes30">30 分钟</option>
-                    <option value="hour1">1 小时</option>
-                    <option value="hours3">3 小时</option>
-                    <option value="hours6">6 小时</option>
-                    <option value="hours12">12 小时</option>
-                    <option value="hours24">24 小时</option>
-                  </select>
-                </label>
-                <label style={rowStyle}>
-                  <span style={{fontWeight: 600}}>{t('settings.showSyncNotification', '显示同步完成通知')}</span>
-                  <input type="checkbox" checked={settings.showSyncNotification} onChange={e => updateSetting("showSyncNotification", e.target.checked)} />
-                </label>
-              </div>
-            )}
+        {!settings ? (
+          <div style={{ flex: 1, display: "grid", placeItems: "center", color: loadError ? "var(--danger)" : theme.textSub, padding: 24 }}>
+            {loadError || t("common.loading")}
+          </div>
+        ) : (
+          <div className="settings-layout">
+            <nav className="settings-nav" aria-label={t("settings.title")} style={{ borderColor: theme.divider, background: theme.sidebarBg }}>
+              {navItems.map(({ id, label, icon: NavIcon }) => (
+                <button
+                  key={id}
+                  className="settings-nav-button"
+                  onClick={() => setActiveTab(id)}
+                  aria-current={activeTab === id ? "page" : undefined}
+                  style={{ color: activeTab === id ? "var(--accent)" : theme.textSub, background: activeTab === id ? "var(--accent-soft)" : "transparent" }}
+                >
+                  <NavIcon size={17} spinning={false} />
+                  {label}
+                </button>
+              ))}
+            </nav>
 
-            {activeTab === "storage" && (
-              <div style={sectionStyle}>
-                <h3 style={{fontWeight: 700}}>{t('settings.storageSettings', '存储设置')}</h3>
-                <label style={rowStyle}>
-                  <span style={{fontWeight: 600}}>{t('settings.customDataDir', '自定义存储路径')}</span>
-                  <div style={{display: 'flex', gap: 8}}>
-                    <input 
-                      type="text" 
-                      value={settings.customDataDirectory} 
-                      onChange={e => updateSetting("customDataDirectory", e.target.value)}
-                      placeholder="留空则使用默认路径"
-                      style={{...inputStyle(t), width: 200}}
-                    />
+            <main className="settings-content">
+              {activeTab === "sync" && (
+                <SettingsSection title={t("settings.syncSettings")} description={t("settings.syncSettingsDesc")}>
+                  <div className="setting-group" style={groupStyle}>
+                    <SettingToggle label={t("settings.enableAutoSync")} description={t("settings.enableAutoSyncDesc")} checked={settings.autoSyncEnabled} onChange={(value) => updateSetting("autoSyncEnabled", value)} rowStyle={rowStyle} />
+                    <SettingToggle label={t("settings.syncOnStartup")} description={t("settings.syncOnStartupDesc")} checked={settings.syncOnStartup} onChange={(value) => updateSetting("syncOnStartup", value)} rowStyle={rowStyle} />
+                    <SettingRow label={t("settings.syncInterval")} rowStyle={rowStyle}>
+                      <select className="field-select" value={typeof settings.syncInterval === "string" ? settings.syncInterval : "hours6"} onChange={(event) => updateSetting("syncInterval", event.target.value as AppSettings["syncInterval"])} style={fieldStyle}>
+                        <option value="minutes30">{t("settings.interval30m")}</option>
+                        <option value="hour1">{t("settings.interval1h")}</option>
+                        <option value="hours3">{t("settings.interval3h")}</option>
+                        <option value="hours6">{t("settings.interval6h")}</option>
+                        <option value="hours12">{t("settings.interval12h")}</option>
+                        <option value="hours24">{t("settings.interval24h")}</option>
+                      </select>
+                    </SettingRow>
                   </div>
-                </label>
-                <label style={rowStyle}>
-                  <span style={{fontWeight: 600}}>{t('settings.defaultExportFormat', '默认导出格式')}</span>
-                  <select 
-                    value={settings.defaultExportFormat} 
-                    onChange={e => updateSetting("defaultExportFormat", e.target.value)}
-                    style={inputStyle(t)}
-                  >
-                    <option value="markdown">Markdown (.md)</option>
-                    <option value="pdf">PDF (.pdf)</option>
-                    <option value="json">结构化 JSON</option>
-                    <option value="jsonl">原始 JSONL</option>
-                  </select>
-                </label>
-                <div style={{marginTop: 16, padding: 12, background: theme.hover, borderRadius: 8}}>
-                  <p style={{margin: "0 0 10px 0", fontSize: 13, fontWeight: 500}}>{t('settings.exportDirDesc', '本地会话 Markdown 及资源导出目录：')}</p>
-                  <button onClick={async () => {
-                    if (accountId) {
-                      await exportAllToZip(accountId);
-                    } else {
-                      alert("请先登录账号");
-                    }
-                  }} style={{
-                    padding: "6px 12px", background: theme.btnHoverBg, color: theme.text, border: "none", borderRadius: 6, cursor: "pointer", width: "100%"
-                  }}>
-                    {t('settings.openExportDir', '打开导出目录')}
-                  </button>
+                </SettingsSection>
+              )}
+
+              {activeTab === "storage" && (
+                <SettingsSection title={t("settings.storageSettings")} description={t("settings.storageSettingsDesc")}>
+                  <div style={{ padding: 16, border: `1px solid ${theme.border}`, borderRadius: 14, background: theme.sidebarBg }}>
+                    <div className="setting-label">{t("settings.openExportFolder")}</div>
+                    <div className="setting-description" style={subtleStyle}>{t("settings.openExportFolderDesc")}</div>
+                    <button className="button-secondary" style={{ marginTop: 12, color: theme.text, borderColor: theme.border, background: theme.cardBg }} onClick={() => accountId ? void openExportDirectory(accountId) : setLoadError(t("settings.loginRequired"))}>
+                      {t("settings.openExportFolder")}
+                    </button>
+                  </div>
+                </SettingsSection>
+              )}
+
+              {activeTab === "run" && (
+                <SettingsSection title={t("settings.runSettings")} description={t("settings.runSettingsDesc")}>
+                  <div className="setting-group" style={groupStyle}>
+                    <SettingToggle label={t("settings.minimizeToTray")} description={t("settings.minimizeToTrayDesc")} checked={settings.runInBackground} onChange={(value) => updateSetting("runInBackground", value)} rowStyle={rowStyle} />
+                    <SettingToggle label={t("settings.hideDockIcon")} description={t("settings.hideDockIconDesc")} checked={settings.hideDockIcon} onChange={(value) => updateSetting("hideDockIcon", value)} rowStyle={rowStyle} />
+                  </div>
+                </SettingsSection>
+              )}
+
+              {activeTab === "security" && (
+                <SettingsSection title={t("settings.securityAndPrivacy")} description={t("settings.securityDesc")}>
+                  <div className="setting-group" style={groupStyle}>
+                    <SettingRow label={t("settings.autoLock")} rowStyle={rowStyle}>
+                      <select className="field-select" value={settings.autoLockPolicy} onChange={(event) => updateSetting("autoLockPolicy", event.target.value as AppSettings["autoLockPolicy"])} style={fieldStyle}>
+                        <option value="never">{t("settings.lockNever")}</option>
+                        <option value="immediately">{t("settings.lockImmediately")}</option>
+                        <option value="minutes1">{t("settings.lock1Min")}</option>
+                        <option value="minutes5">{t("settings.lock5Min")}</option>
+                        <option value="minutes15">{t("settings.lock15Min")}</option>
+                        <option value="minutes30">{t("settings.lock30Min")}</option>
+                      </select>
+                    </SettingRow>
+                  </div>
+                  <div style={{ marginTop: 16, padding: 16, border: `1px solid ${theme.border}`, borderRadius: 14, background: theme.sidebarBg }}>
+                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, marginBottom: 14 }}>
+                      <span className="setting-label">{t("settings.passwordStatus")}</span>
+                      <span style={{ color: settings.passwordHash ? "var(--success)" : theme.textMuted, fontSize: 12, fontWeight: 700 }}>{t(settings.passwordHash ? "settings.passwordSet" : "settings.passwordNotSet")}</span>
+                    </div>
+                    <div style={{ display: "grid", gap: 10 }}>
+                      {settings.passwordHash && <input type="password" className="field-input" autoComplete="current-password" value={passwordForm.current} placeholder={t("settings.currentPassword")} onChange={(event) => setPasswordForm((value) => ({ ...value, current: event.target.value }))} style={{ ...fieldStyle, width: "100%" }} />}
+                      <input type="password" className="field-input" autoComplete="new-password" value={passwordForm.next} placeholder={t("settings.newPassword")} onChange={(event) => setPasswordForm((value) => ({ ...value, next: event.target.value }))} style={{ ...fieldStyle, width: "100%" }} />
+                      <input type="password" className="field-input" autoComplete="new-password" value={passwordForm.confirm} placeholder={t("settings.confirmPassword")} onChange={(event) => setPasswordForm((value) => ({ ...value, confirm: event.target.value }))} style={{ ...fieldStyle, width: "100%" }} />
+                    </div>
+                    {passwordMessage && <div style={{ marginTop: 10, color: passwordMessage.kind === "error" ? "var(--danger)" : "var(--success)", fontSize: 12, fontWeight: 650 }}>{passwordMessage.text}</div>}
+                    <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 14 }}>
+                      {settings.passwordHash && <button className="button-danger" disabled={passwordBusy || !passwordForm.current} onClick={() => void updatePassword(true)}>{t("settings.removePassword")}</button>}
+                      <button className="button-primary" disabled={passwordBusy || !passwordForm.next || (settings.passwordHash ? !passwordForm.current : false)} onClick={() => void updatePassword(false)}>{t(settings.passwordHash ? "settings.changePassword" : "settings.setPassword")}</button>
+                    </div>
+                  </div>
+                </SettingsSection>
+              )}
+
+              {activeTab === "appearance" && (
+                <SettingsSection title={t("settings.appearanceSettings")} description={t("settings.appearanceDesc")}>
+                  <div className="setting-group" style={groupStyle}>
+                    <SettingRow label={t("settings.themeMode")} rowStyle={rowStyle}>
+                      <select className="field-select" value={settings.theme} onChange={(event) => updateSetting("theme", event.target.value as AppSettings["theme"])} style={fieldStyle}>
+                        <option value="auto">{t("settings.themeAuto")}</option>
+                        <option value="light">{t("settings.themeLight")}</option>
+                        <option value="dark">{t("settings.themeDark")}</option>
+                      </select>
+                    </SettingRow>
+                    <SettingRow label={t("settings.language")} rowStyle={rowStyle}>
+                      <select className="field-select" value={settings.language} onChange={(event) => { const language = event.target.value as AppSettings["language"]; updateSetting("language", language); void i18n.changeLanguage(language); }} style={fieldStyle}>
+                        <option value="zh-CN">{t("settings.languageZh")}</option>
+                        <option value="en">{t("settings.languageEn")}</option>
+                      </select>
+                    </SettingRow>
+                    <SettingRow label={t("settings.sidebarWidth")} rowStyle={rowStyle}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 10, width: 220 }}>
+                        <input type="range" min={240} max={380} step={4} value={settings.sidebarWidth} onChange={(event) => updateSetting("sidebarWidth", Number(event.target.value))} style={{ width: "100%", accentColor: "var(--accent)" }} />
+                        <span style={{ width: 46, color: theme.textSub, fontSize: 12, textAlign: "right" }}>{settings.sidebarWidth}px</span>
+                      </div>
+                    </SettingRow>
+                  </div>
+                </SettingsSection>
+              )}
+
+              {activeTab === "about" && (
+                <div style={{ minHeight: 360, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", textAlign: "center" }}>
+                  <img src="/app-icon.png" width={84} height={84} alt="" style={{ borderRadius: 22, filter: "drop-shadow(0 14px 24px rgba(38,48,110,.2))" }} />
+                  <h3 style={{ margin: "18px 0 4px", color: theme.text, fontSize: 23, letterSpacing: "-.03em" }}>Chat Vault</h3>
+                  <p style={{ margin: 0, color: theme.textSub, fontSize: 13 }}>{t("settings.aboutTagline")}</p>
+                  <div style={{ marginTop: 20, color: theme.textMuted, fontSize: 12 }}>{t("settings.version", { version: "3.0.0" })}</div>
+                  <div style={{ marginTop: 5, maxWidth: 430, color: theme.textMuted, fontSize: 11.5, lineHeight: 1.5 }}>{t("settings.basedOn")}</div>
                 </div>
-              </div>
-            )}
-
-            {activeTab === "run" && (
-              <div style={sectionStyle}>
-                <h3 style={{fontWeight: 700}}>{t('settings.runSettings', '运行设置')}</h3>
-                <label style={rowStyle}>
-                  <span style={{fontWeight: 600}}>{t('settings.runInBackground', '关闭窗口时最小化到托盘 (后台运行)')}</span>
-                  <input type="checkbox" checked={settings.runInBackground} onChange={e => updateSetting("runInBackground", e.target.checked)} />
-                </label>
-                <label style={rowStyle}>
-                  <span style={{fontWeight: 600}}>{t('settings.hideDockIcon', '隐藏 Dock 图标 (macOS 需重启应用)')}</span>
-                  <input type="checkbox" checked={settings.hideDockIcon} onChange={e => updateSetting("hideDockIcon", e.target.checked)} />
-                </label>
-              </div>
-            )}
-
-            {activeTab === "security" && (
-              <div style={sectionStyle}>
-                <h3 style={{fontWeight: 700}}>{t('settings.securitySettings', '安全与隐私')}</h3>
-                <label style={rowStyle}>
-                  <span style={{fontWeight: 600}}>{t('settings.autoLock', '自动锁定')}</span>
-                  <select 
-                    value={settings.autoLockPolicy} 
-                    onChange={e => updateSetting("autoLockPolicy", e.target.value)}
-                    style={inputStyle(t)}
-                  >
-                    <option value="never">从不</option>
-                    <option value="immediately">立即</option>
-                    <option value="minutes1">1 分钟</option>
-                    <option value="minutes5">5 分钟</option>
-                    <option value="minutes15">15 分钟</option>
-                    <option value="minutes30">30 分钟</option>
-                  </select>
-                </label>
-                <div style={{marginTop: 16, padding: 12, background: theme.hover, borderRadius: 8}}>
-                  <p style={{margin: "0 0 10px 0", fontSize: 13}}>目前密码状态: {settings.passwordHash ? "✅ 已设置" : "❌ 未设置"}</p>
-                  <button onClick={() => {
-                    // TODO: Implement password change dialog
-                    alert("密码修改功能将在后续更新");
-                  }} style={{
-                    padding: "6px 12px", background: theme.btnHoverBg, color: theme.text, border: "none", borderRadius: 6, cursor: "pointer"
-                  }}>
-                    修改密码...
-                  </button>
-                </div>
-              </div>
-            )}
-
-            {activeTab === "appearance" && (
-              <div style={sectionStyle}>
-                <h3 style={{fontWeight: 700}}>{t('settings.appearanceSettings', '外观设置')}</h3>
-                <label style={rowStyle}>
-                  <span style={{fontWeight: 600}}>{t('settings.themeMode', '主题模式')}</span>
-                  <select 
-                    value={settings.theme} 
-                    onChange={e => updateSetting("theme", e.target.value)}
-                    style={inputStyle(t)}
-                  >
-                    <option value="auto">跟随系统</option>
-                    <option value="light">亮色</option>
-                    <option value="dark">暗色</option>
-                  </select>
-                </label>
-                <label style={rowStyle}>
-                  <span style={{fontWeight: 600}}>{t('settings.language', '显示语言')}</span>
-                  <select 
-                    value={settings.language || "zh"} 
-                    onChange={e => {
-                      updateSetting("language", e.target.value);
-                      i18n.changeLanguage(e.target.value);
-                    }}
-                    style={inputStyle(theme)}
-                  >
-                    <option value="zh">简体中文</option>
-                    <option value="en">English</option>
-                  </select>
-                </label>
-                <label style={rowStyle}>
-                  <span style={{fontWeight: 600}}>{t('settings.sidebarWidth', '侧边栏宽度')}</span>
-                  <input 
-                    type="range" 
-                    min={200} max={400} 
-                    value={settings.sidebarWidth} 
-                    onChange={e => updateSetting("sidebarWidth", parseInt(e.target.value, 10))} 
-                  />
-                  <span>{settings.sidebarWidth}px</span>
-                </label>
-              </div>
-            )}
-
-            {activeTab === "about" && (
-              <div style={{textAlign: "center", paddingTop: 40}}>
-                <h2 style={{marginBottom: 4}}>Chat Vault</h2>
-                <p style={{color: theme.textSub, marginTop: 0}}>Version 3.0.0</p>
-                <p style={{fontSize: 13}}>Based on gemini-collector by FirenzeLor</p>
-              </div>
-            )}
-
+              )}
+            </main>
           </div>
-        </div>
+        )}
 
-        {/* Footer */}
-        <div style={{
-          padding: "16px 24px",
-          borderTop: `1px solid ${theme.border}`,
-          display: "flex",
-          justifyContent: "flex-end",
-          gap: 12,
-          background: theme.topBarBg,
-        }}>
-          <button 
-            onClick={onClose}
-            style={{
-              padding: "8px 16px",
-              background: "transparent",
-              color: theme.text,
-              border: `1px solid ${theme.border}`,
-              borderRadius: 6,
-              cursor: "pointer",
-            }}
-          >
-            {t('settings.cancel', '取消')}
-          </button>
-          <button 
-            onClick={handleSave}
-            disabled={saving}
-            style={{
-              padding: "8px 24px",
-              background: "#3b82f6",
-              color: "white",
-              border: "none",
-              borderRadius: 6,
-              cursor: saving ? "wait" : "pointer",
-              fontWeight: 500,
-            }}
-          >
-            {saving ? t('settings.saving', '保存中...') : t('settings.save', '保存设置')}
-          </button>
-        </div>
+        <footer className="modal-footer" style={{ borderColor: theme.divider }}>
+          {loadError && <span style={{ marginRight: "auto", color: "var(--danger)", fontSize: 12 }}>{loadError}</span>}
+          <button className="button-secondary" onClick={onClose} style={{ color: theme.text, borderColor: theme.border, background: "transparent" }}>{t("common.cancel")}</button>
+          <button className="button-primary" onClick={() => void handleSave()} disabled={!settings || saving}>{saving ? t("common.saving") : t("common.save")}</button>
+        </footer>
       </div>
     </div>
   );
 }
 
-const sectionStyle: React.CSSProperties = {
-  display: "flex",
-  flexDirection: "column",
-  gap: 16,
-};
+function SettingsSection({ title, description, children }: { title: string; description: string; children: React.ReactNode }) {
+  const theme = useTheme();
+  return <section><h3 className="settings-section-title" style={{ color: theme.text }}>{title}</h3><p className="settings-section-description" style={{ color: theme.textSub }}>{description}</p>{children}</section>;
+}
 
-const rowStyle: React.CSSProperties = {
-  display: "flex",
-  justifyContent: "space-between",
-  alignItems: "center",
-  fontSize: 14,
-};
+function SettingRow({ label, description, children, rowStyle }: { label: string; description?: string; children: React.ReactNode; rowStyle?: React.CSSProperties }) {
+  const theme = useTheme();
+  return <div className="setting-row" style={rowStyle}><div><div className="setting-label" style={{ color: theme.text }}>{label}</div>{description && <div className="setting-description" style={{ color: theme.textMuted }}>{description}</div>}</div>{children}</div>;
+}
 
-const inputStyle = (t: any): React.CSSProperties => ({
-  padding: "6px 10px",
-  borderRadius: 4,
-  border: `2px solid ${t.border}`,
-  background: t.sidebarBg,
-  color: t.text,
-  outline: "none",
-});
+function SettingToggle({ label, description, checked, onChange, rowStyle }: { label: string; description?: string; checked: boolean; onChange: (value: boolean) => void; rowStyle?: React.CSSProperties }) {
+  return <SettingRow label={label} description={description} rowStyle={rowStyle}><label className="toggle"><input type="checkbox" checked={checked} onChange={(event) => onChange(event.target.checked)} /><span className="toggle-track" /></label></SettingRow>;
+}

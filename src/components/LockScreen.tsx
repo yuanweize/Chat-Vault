@@ -1,105 +1,48 @@
-import React, { useState } from "react";
+import { useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { useTheme } from "../theme";
 import { useTranslation } from "react-i18next";
+import { useTheme } from "../theme";
+import { LockIcon } from "./Icons";
 
-interface LockScreenProps {
-  onUnlock: () => void;
-}
-
-export function LockScreen({ onUnlock }: LockScreenProps) {
-  const tTheme = useTheme();
+export function LockScreen({ onUnlock }: { onUnlock: () => void }) {
+  const theme = useTheme();
   const { t } = useTranslation();
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [unlocking, setUnlocking] = useState(false);
 
-  const handleUnlock = async (e?: React.FormEvent) => {
-    e?.preventDefault();
-    if (!password) return;
+  const handleUnlock = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!password || unlocking) return;
     setUnlocking(true);
     setError("");
     try {
-      const success = await invoke<boolean>("verify_unlock", { password });
-      if (success) {
-        onUnlock();
-      } else {
+      if (await invoke<boolean>("verify_unlock", { password })) onUnlock();
+      else {
         setError(t("lock.wrongPassword"));
         setPassword("");
       }
-    } catch (err: any) {
-      setError(err.toString());
+    } catch (reason) {
+      setError(String(reason));
     } finally {
       setUnlocking(false);
     }
   };
 
   return (
-    <div style={{
-      display: "flex",
-      flexDirection: "column",
-      alignItems: "center",
-      justifyContent: "center",
-      height: "100vh",
-      background: tTheme.sidebarBg,
-      color: tTheme.text,
-      fontFamily: "system-ui, -apple-system, sans-serif"
-    }}>
-      <div style={{
-        width: 340,
-        padding: 32,
-        borderRadius: 4,
-        background: tTheme.topBarBg,
-        border: `2px solid ${tTheme.border}`,
-        display: "flex",
-        flexDirection: "column",
-        alignItems: "center"
-      }}>
-        <div style={{ fontSize: 48, marginBottom: 16 }}>🔒</div>
-        <h2 style={{ margin: "0 0 24px 0", fontSize: 20, fontWeight: 700 }}>{t("lock.title")}</h2>
-        
-        <form onSubmit={handleUnlock} style={{ width: "100%", display: "flex", flexDirection: "column", gap: 16 }}>
-          <input
-            type="password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            placeholder={t("lock.enterPassword")}
-            autoFocus
-            style={{
-              padding: "12px 14px",
-              borderRadius: 4,
-              border: `2px solid ${error ? "#ef4444" : tTheme.border}`,
-              background: tTheme.sidebarBg,
-              color: tTheme.text,
-              fontSize: 14,
-              outline: "none",
-              width: "100%",
-              boxSizing: "border-box",
-              transition: "border-color 0.15s"
-            }}
-          />
-          {error && <div style={{ color: "#ef4444", fontSize: 13, textAlign: "center", fontWeight: 600 }}>{error}</div>}
-          
-          <button
-            type="submit"
-            disabled={unlocking || !password}
-            style={{
-              padding: "12px 16px",
-              background: "#3b82f6",
-              color: "white",
-              border: "none",
-              borderRadius: 4,
-              fontSize: 14,
-              fontWeight: 600,
-              cursor: unlocking || !password ? "not-allowed" : "pointer",
-              opacity: unlocking || !password ? 0.7 : 1,
-              transition: "opacity 0.15s, background 0.15s"
-            }}
-          >
-            {unlocking ? t("lock.unlocking") : t("lock.unlock")}
-          </button>
-        </form>
-      </div>
-    </div>
+    <main className="lock-shell" style={{ background: theme.appBg }}>
+      <section className="lock-card" aria-labelledby="lock-title">
+        <div className="lock-card-inner" style={{ padding: 30, background: theme.cardBg, borderColor: theme.border, textAlign: "center" }}>
+          <div style={{ width: 58, height: 58, margin: "0 auto 18px", borderRadius: 16, display: "grid", placeItems: "center", color: "var(--accent)", background: "var(--accent-soft)" }}><LockIcon size={25} /></div>
+          <h1 id="lock-title" style={{ margin: 0, color: theme.text, fontSize: 20, fontWeight: 760, letterSpacing: "-.02em" }}>{t("lock.title")}</h1>
+          <p style={{ margin: "7px 0 22px", color: theme.textSub, fontSize: 12.5 }}>{t("lock.subtitle")}</p>
+          <form onSubmit={(event) => void handleUnlock(event)} style={{ display: "grid", gap: 12 }}>
+            <input className="field-input" type="password" autoComplete="current-password" autoFocus value={password} onChange={(event) => setPassword(event.target.value)} placeholder={t("lock.enterPassword")} aria-invalid={!!error} style={{ width: "100%", minHeight: 42, color: theme.text, background: theme.sidebarBg, borderColor: error ? "var(--danger)" : theme.border }} />
+            {error && <div role="alert" style={{ color: "var(--danger)", fontSize: 12, fontWeight: 650 }}>{error}</div>}
+            <button className="button-primary" type="submit" disabled={unlocking || !password} style={{ minHeight: 42 }}>{unlocking ? t("lock.unlocking") : t("lock.unlock")}</button>
+          </form>
+        </div>
+      </section>
+    </main>
   );
 }

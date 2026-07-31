@@ -30,4 +30,24 @@ export default defineConfig(async () => ({
       ignored: ["**/src-tauri/**"],
     },
   },
+  build: {
+    // Markdown + KaTeX is intentionally lazy-loaded with ChatView. Its 600 kB
+    // parsed chunk is ~180 kB gzip and never blocks the account picker.
+    chunkSizeWarningLimit: 650,
+    rollupOptions: {
+      output: {
+        manualChunks(id) {
+          if (!id.includes("node_modules")) return undefined;
+          if (id.includes("react-syntax-highlighter") || id.includes("refractor") || id.includes("highlight.js") || id.includes("prismjs") || id.includes("lowlight")) return "syntax";
+          if (id.includes("react-markdown") || id.includes("remark-") || id.includes("rehype-") || id.includes("katex") || id.includes("unified") || id.includes("micromark") || id.includes("mdast-") || id.includes("hast-") || id.includes("vfile") || id.includes("property-information")) return "markdown";
+          if (id.includes("react-virtuoso")) return "virtuoso";
+          if (id.includes("jszip")) return "export";
+          if (id.includes("i18next")) return "i18n";
+          if (id.includes("react") || id.includes("scheduler")) return "react";
+          if (id.includes("@tauri-apps")) return "tauri";
+          return undefined;
+        },
+      },
+    },
+  },
 }));

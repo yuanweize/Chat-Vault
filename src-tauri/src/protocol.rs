@@ -67,8 +67,8 @@ pub fn iso_to_epoch_seconds(iso_text: &str) -> Option<i64> {
         return None;
     }
     // Handle "Z" suffix
-    let normalized = if candidate.ends_with('Z') {
-        format!("{}+00:00", &candidate[..candidate.len() - 1])
+    let normalized = if let Some(stripped) = candidate.strip_suffix('Z') {
+        format!("{stripped}+00:00")
     } else {
         candidate.to_string()
     };

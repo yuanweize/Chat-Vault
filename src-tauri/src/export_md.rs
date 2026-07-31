@@ -1,4 +1,3 @@
-use crate::str_err::ToStringErr;
 use anyhow::Result;
 use serde_json::Value;
 use std::fs;
@@ -53,7 +52,7 @@ pub fn generate_markdown_from_rows(rows: &[Value], markdown_file: &Path) -> Resu
                 for line in thinking.lines() {
                     md.push_str(&format!("> {}\n", line));
                 }
-                md.push_str("\n");
+                md.push('\n');
             }
         }
 
@@ -86,7 +85,7 @@ pub fn generate_markdown_from_rows(rows: &[Value], markdown_file: &Path) -> Resu
                         md.push_str(&format!("[{}]({})\n", name, rel_path));
                     }
                 }
-                md.push_str("\n");
+                md.push('\n');
             }
         }
 

@@ -47,7 +47,7 @@ async fn init_exporter() -> GeminiExporter {
     let target = mappings
         .iter()
         .find(|m| m.email.contains(&account))
-        .expect(&format!("未找到 {} 账号", account));
+        .unwrap_or_else(|| panic!("未找到 {} 账号", account));
     let mut exporter = GeminiExporter::new(all_cookies, target.authuser.clone(), None, None);
     exporter.init_auth().await.expect("init_auth 失败");
     exporter
@@ -104,9 +104,9 @@ async fn dump_dr_conversation(
             .unwrap_or_default();
 
         let has_56 = keys.contains(&"56".to_string());
-        let has_57 = keys.contains(&"57".to_string());
-        let has_58 = keys.contains(&"58".to_string());
-        let has_70 = keys.contains(&"70".to_string());
+        let _has_57 = keys.contains(&"57".to_string());
+        let _has_58 = keys.contains(&"58".to_string());
+        let _has_70 = keys.contains(&"70".to_string());
         let has_30 = ai
             .as_array()
             .and_then(|a| a.get(30))
@@ -236,7 +236,7 @@ async fn assert_media_downloadable(exporter: &GeminiExporter, file: &MediaFile, 
     let url = file
         .url
         .as_ref()
-        .expect(&format!("[{}] url 不应为空", label));
+        .unwrap_or_else(|| panic!("[{}] url 不应为空", label));
     assert!(
         url.starts_with("https://"),
         "[{}] URL 应以 https:// 开头",
@@ -297,7 +297,7 @@ async fn test_api_full_pipeline() {
     let target = mappings
         .iter()
         .find(|m| m.email.contains(&account))
-        .expect(&format!("未找到 {} 账号", account));
+        .unwrap_or_else(|| panic!("未找到 {} 账号", account));
     eprintln!("  账号: {} authuser={:?}", target.email, target.authuser);
 
     let mut exporter = GeminiExporter::new(all_cookies, target.authuser.clone(), None, None);
@@ -339,7 +339,7 @@ async fn test_api_full_pipeline() {
         .expect("get_chat_detail 失败");
 
     assert!(!raw_turns.is_empty(), "对话应有 turns");
-    let mut parsed_turns: Vec<ParsedTurn> = raw_turns.iter().map(|t| parse_turn(t)).collect();
+    let mut parsed_turns: Vec<ParsedTurn> = raw_turns.iter().map(parse_turn).collect();
     normalize_turn_media_first_seen(&mut parsed_turns);
 
     for (i, turn) in parsed_turns.iter().enumerate() {
@@ -641,7 +641,7 @@ async fn test_api_full_pipeline() {
         .get_chat_detail(&conv_id_2)
         .await
         .expect("get_chat_detail(conv2) 失败");
-    let mut parsed2: Vec<ParsedTurn> = raw2.iter().map(|t| parse_turn(t)).collect();
+    let mut parsed2: Vec<ParsedTurn> = raw2.iter().map(parse_turn).collect();
     normalize_turn_media_first_seen(&mut parsed2);
 
     eprintln!("  {} turns", parsed2.len());

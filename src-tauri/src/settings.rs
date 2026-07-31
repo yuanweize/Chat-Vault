@@ -13,12 +13,13 @@ use crate::str_err::ToStringErr;
 // ============================================================================
 
 /// 同步间隔选项
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
 #[serde(rename_all = "camelCase")]
 pub enum SyncInterval {
     Minutes30,
     Hour1,
     Hours3,
+    #[default]
     Hours6,
     Hours12,
     Hours24,
@@ -39,16 +40,11 @@ impl SyncInterval {
     }
 }
 
-impl Default for SyncInterval {
-    fn default() -> Self {
-        SyncInterval::Hours6
-    }
-}
-
 /// 导出格式
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
 #[serde(rename_all = "camelCase")]
 pub enum ExportFormat {
+    #[default]
     Markdown,
     Pdf,
     Json,
@@ -57,14 +53,8 @@ pub enum ExportFormat {
     KelivoSplit,
 }
 
-impl Default for ExportFormat {
-    fn default() -> Self {
-        ExportFormat::Markdown
-    }
-}
-
 /// 自动锁定策略
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
 #[serde(rename_all = "camelCase")]
 pub enum AutoLockPolicy {
     Immediately,
@@ -72,6 +62,7 @@ pub enum AutoLockPolicy {
     Minutes5,
     Minutes15,
     Minutes30,
+    #[default]
     Never,
 }
 
@@ -88,25 +79,14 @@ impl AutoLockPolicy {
     }
 }
 
-impl Default for AutoLockPolicy {
-    fn default() -> Self {
-        AutoLockPolicy::Never
-    }
-}
-
 /// 主题
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
 #[serde(rename_all = "camelCase")]
 pub enum Theme {
+    #[default]
     Auto,
     Light,
     Dark,
-}
-
-impl Default for Theme {
-    fn default() -> Self {
-        Theme::Auto
-    }
 }
 
 /// 完整的应用设置
@@ -150,7 +130,7 @@ pub struct AppSettings {
     pub start_on_login: bool,
 
     // ── 安全设置 ──
-    /// 密码哈希（SHA-256，空 = 无密码）
+    /// 版本化密码哈希（PBKDF2-SHA256；旧版 SHA-256 在验证后自动迁移）
     #[serde(default)]
     pub password_hash: String,
     /// 自动锁定策略
@@ -224,6 +204,7 @@ impl AppSettings {
 
     /// 保存设置到 AppDataDir
     pub fn save(&self, data_dir: &Path) -> Result<(), String> {
+        std::fs::create_dir_all(data_dir).str_err()?;
         let path = data_dir.join(SETTINGS_FILE);
         let content = serde_json::to_string_pretty(self).str_err()?;
         std::fs::write(&path, content).str_err()?;
@@ -244,12 +225,69 @@ impl AppSettings {
 // 密码工具
 // ============================================================================
 
-/// 将明文密码哈希为 SHA-256 hex 字符串
+const PASSWORD_SCHEME: &str = "pbkdf2-sha256";
+const PASSWORD_ITERATIONS: u32 = 210_000;
+const PASSWORD_SALT_LEN: usize = 16;
+const PASSWORD_HASH_LEN: usize = 32;
+
+fn encode_hex(bytes: &[u8]) -> String {
+    let mut output = String::with_capacity(bytes.len() * 2);
+    for byte in bytes {
+        use std::fmt::Write;
+        let _ = write!(output, "{byte:02x}");
+    }
+    output
+}
+
+fn decode_hex(value: &str) -> Option<Vec<u8>> {
+    if !value.len().is_multiple_of(2) {
+        return None;
+    }
+    (0..value.len())
+        .step_by(2)
+        .map(|index| u8::from_str_radix(&value[index..index + 2], 16).ok())
+        .collect()
+}
+
+fn constant_time_equal(left: &[u8], right: &[u8]) -> bool {
+    if left.len() != right.len() {
+        return false;
+    }
+    left.iter()
+        .zip(right.iter())
+        .fold(0u8, |difference, (a, b)| difference | (a ^ b))
+        == 0
+}
+
+fn legacy_sha256(password: &str) -> Vec<u8> {
+    use sha2::{Digest, Sha256};
+    Sha256::digest(password.as_bytes()).to_vec()
+}
+
+fn is_legacy_password_hash(hash: &str) -> bool {
+    hash.len() == 64 && hash.bytes().all(|byte| byte.is_ascii_hexdigit())
+}
+
+/// 使用随机盐和 PBKDF2-SHA256 生成版本化密码哈希。
 pub fn hash_password(password: &str) -> String {
-    use sha2::{Digest as Sha256Digest, Sha256};
-    let mut hasher = Sha256::new();
-    hasher.update(password.as_bytes());
-    format!("{:x}", hasher.finalize())
+    use pbkdf2::pbkdf2_hmac;
+    use rand::RngCore;
+    use sha2::Sha256;
+
+    let mut salt = [0u8; PASSWORD_SALT_LEN];
+    rand::rng().fill_bytes(&mut salt);
+    let mut derived = [0u8; PASSWORD_HASH_LEN];
+    pbkdf2_hmac::<Sha256>(
+        password.as_bytes(),
+        &salt,
+        PASSWORD_ITERATIONS,
+        &mut derived,
+    );
+    format!(
+        "{PASSWORD_SCHEME}${PASSWORD_ITERATIONS}${}${}",
+        encode_hex(&salt),
+        encode_hex(&derived),
+    )
 }
 
 /// 验证密码
@@ -257,7 +295,35 @@ pub fn verify_password(password: &str, hash: &str) -> bool {
     if hash.is_empty() {
         return true; // 未设置密码
     }
-    hash_password(password) == hash
+    if is_legacy_password_hash(hash) {
+        let Some(expected) = decode_hex(hash) else {
+            return false;
+        };
+        return constant_time_equal(&legacy_sha256(password), &expected);
+    }
+
+    use pbkdf2::pbkdf2_hmac;
+    use sha2::Sha256;
+    let mut parts = hash.split('$');
+    if parts.next() != Some(PASSWORD_SCHEME) {
+        return false;
+    }
+    let Some(iterations) = parts.next().and_then(|value| value.parse::<u32>().ok()) else {
+        return false;
+    };
+    let (Some(salt), Some(expected), None) = (
+        parts.next().and_then(decode_hex),
+        parts.next().and_then(decode_hex),
+        parts.next(),
+    ) else {
+        return false;
+    };
+    if expected.len() != PASSWORD_HASH_LEN || !(10_000..=1_000_000).contains(&iterations) {
+        return false;
+    }
+    let mut derived = vec![0u8; expected.len()];
+    pbkdf2_hmac::<Sha256>(password.as_bytes(), &salt, iterations, &mut derived);
+    constant_time_equal(&derived, &expected)
 }
 
 // ============================================================================
@@ -268,13 +334,29 @@ pub fn verify_password(password: &str, hash: &str) -> bool {
 pub fn load_settings(app: tauri::AppHandle) -> Result<serde_json::Value, String> {
     let data_dir = app.path().app_data_dir().str_err()?;
     let settings = AppSettings::load(&data_dir);
-    serde_json::to_value(&settings).str_err()
+    let mut value = serde_json::to_value(&settings).str_err()?;
+    if let Some(object) = value.as_object_mut() {
+        object.insert(
+            "passwordHash".to_string(),
+            serde_json::Value::String(
+                if settings.password_hash.is_empty() {
+                    ""
+                } else {
+                    "configured"
+                }
+                .to_string(),
+            ),
+        );
+    }
+    Ok(value)
 }
 
 #[tauri::command]
 pub fn save_settings(app: tauri::AppHandle, settings: serde_json::Value) -> Result<(), String> {
     let data_dir = app.path().app_data_dir().str_err()?;
-    let parsed: AppSettings = serde_json::from_value(settings).str_err()?;
+    let mut parsed: AppSettings = serde_json::from_value(settings).str_err()?;
+    // 密码只能通过 set_password 修改；永不信任或回写前端传来的占位值。
+    parsed.password_hash = AppSettings::load(&data_dir).password_hash;
     parsed.save(&data_dir)?;
 
     // 通知调度器重新加载配置
@@ -293,10 +375,10 @@ pub fn set_password(
     let mut settings = AppSettings::load(&data_dir);
 
     // 验证当前密码
-    if !settings.password_hash.is_empty() {
-        if !verify_password(&current_password, &settings.password_hash) {
-            return Err("当前密码不正确".to_string());
-        }
+    if !settings.password_hash.is_empty()
+        && !verify_password(&current_password, &settings.password_hash)
+    {
+        return Err("CURRENT_PASSWORD_INVALID".to_string());
     }
 
     // 设置新密码（空字符串 = 清除密码）
@@ -314,8 +396,14 @@ pub fn set_password(
 #[tauri::command]
 pub fn verify_unlock(app: tauri::AppHandle, password: String) -> Result<bool, String> {
     let data_dir = app.path().app_data_dir().str_err()?;
-    let settings = AppSettings::load(&data_dir);
-    Ok(verify_password(&password, &settings.password_hash))
+    let mut settings = AppSettings::load(&data_dir);
+    let verified = verify_password(&password, &settings.password_hash);
+    if verified && is_legacy_password_hash(&settings.password_hash) {
+        settings.password_hash = hash_password(&password);
+        settings.save(&data_dir)?;
+        log::info!("旧版密码哈希已迁移到 PBKDF2-SHA256");
+    }
+    Ok(verified)
 }
 
 #[tauri::command]
@@ -326,3 +414,25 @@ pub fn has_password(app: tauri::AppHandle) -> Result<bool, String> {
 }
 
 use tauri::Manager;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn password_hash_is_salted_and_verifiable() {
+        let first = hash_password("correct horse battery staple");
+        let second = hash_password("correct horse battery staple");
+        assert_ne!(first, second);
+        assert!(first.starts_with("pbkdf2-sha256$"));
+        assert!(verify_password("correct horse battery staple", &first));
+        assert!(!verify_password("wrong", &first));
+    }
+
+    #[test]
+    fn legacy_sha256_passwords_remain_verifiable() {
+        let legacy = encode_hex(&legacy_sha256("legacy password"));
+        assert!(verify_password("legacy password", &legacy));
+        assert!(!verify_password("wrong", &legacy));
+    }
+}

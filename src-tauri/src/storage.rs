@@ -84,7 +84,7 @@ where
 }
 
 pub fn dedupe_raw_turns_by_id(raw_turns: &[Value]) -> (Vec<Value>, usize) {
-    dedupe_by_id(raw_turns, |v| turn_id_from_raw(v))
+    dedupe_by_id(raw_turns, turn_id_from_raw)
 }
 
 pub fn dedupe_message_rows_by_id(rows: &[Value]) -> (Vec<Value>, usize) {
@@ -552,14 +552,13 @@ fn new_media_id(ext: &str) -> String {
     format!("{}.{}", Uuid::new_v4().to_string().replace("-", ""), ext)
 }
 
-
 fn process_deep_research(dr_val: &Value, media_dir: &Path) -> Option<Value> {
     let mut dr = dr_val.clone();
     if dr.get("type").and_then(|v| v.as_str()) == Some("report") {
         if let Some(text) = dr.get("report_text").and_then(|v| v.as_str()) {
             if !text.is_empty() {
                 let media_id = new_media_id("md");
-                let size_bytes = text.as_bytes().len();
+                let size_bytes = text.len();
                 let char_count = text.chars().count();
                 let _ = std::fs::write(media_dir.join(&media_id), text.as_bytes());
                 if let Some(o) = dr.as_object_mut() {
@@ -625,7 +624,7 @@ fn process_canvas_array(canvas_arr: &[Value], media_dir: &Path) -> Vec<Value> {
                     .and_then(|f| f.rsplit(".").next())
                     .unwrap_or("txt");
                 let media_id = new_media_id(ext);
-                let size_bytes = content.as_bytes().len();
+                let size_bytes = content.len();
                 let char_count = content.chars().count();
                 let _ = std::fs::write(media_dir.join(&media_id), content.as_bytes());
                 if let Some(o) = cv.as_object_mut() {
@@ -662,7 +661,7 @@ pub fn turns_to_jsonl_rows(
     let chat_obj = chat_info.as_object();
     let remote_ts = chat_obj
         .and_then(|o| o.get("latest_update_ts"))
-        .and_then(|v| coerce_epoch_seconds(v))
+        .and_then(coerce_epoch_seconds)
         .or_else(|| ts_list.iter().copied().max());
 
     let updated_at = to_iso_utc(remote_ts).or_else(|| {
@@ -807,7 +806,6 @@ pub fn turns_to_jsonl_rows(
 
     rows
 }
-
 
 /// 检测 action_card 消息并标记 hidden: true，同时标记其前面关联的 user 消息。
 fn mark_action_card_hidden(rows: &mut [Value]) {
@@ -1105,20 +1103,18 @@ pub fn build_summary_from_chat_listing(chat: &Value, existing: Option<&Value>) -
         .and_then(|v| v.as_str())
         .unwrap_or_else(|| e.get("title").and_then(|v| v.as_str()).unwrap_or(""));
 
-    let (updated_at, remote_hash) = match chat
-        .get("latest_update_ts")
-        .and_then(|v| coerce_epoch_seconds(v))
-    {
-        Some(ts) => (to_iso_utc(Some(ts)), Some(ts.to_string())),
-        None => (
-            e.get("updatedAt")
-                .and_then(|v| v.as_str())
-                .map(|s| s.to_string()),
-            e.get("remoteHash")
-                .and_then(|v| v.as_str())
-                .map(|s| s.to_string()),
-        ),
-    };
+    let (updated_at, remote_hash) =
+        match chat.get("latest_update_ts").and_then(coerce_epoch_seconds) {
+            Some(ts) => (to_iso_utc(Some(ts)), Some(ts.to_string())),
+            None => (
+                e.get("updatedAt")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string()),
+                e.get("remoteHash")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string()),
+            ),
+        };
 
     let msg_count = get_int_field(e, "messageCount", 0);
     let image_count = get_int_field(e, "imageCount", 0);
@@ -1388,7 +1384,7 @@ mod tests {
         assert_eq!(dr["research_id"], "uuid-123");
 
         // 大小与字符数应注入
-        assert_eq!(dr["size_bytes"], json!(report_text.as_bytes().len()));
+        assert_eq!(dr["size_bytes"], json!(report_text.len()));
         assert_eq!(dr["char_count"], json!(report_text.chars().count()));
     }
 
@@ -1458,7 +1454,7 @@ mod tests {
         let file_a = std::fs::read_to_string(media_dir.join(media_id_a)).unwrap();
         assert_eq!(file_a, canvas_content_a);
         assert_eq!(cv0["title"], "页面A");
-        assert_eq!(cv0["size_bytes"], json!(canvas_content_a.as_bytes().len()));
+        assert_eq!(cv0["size_bytes"], json!(canvas_content_a.len()));
 
         // 第二个 canvas
         let cv1 = &cv_arr[1];

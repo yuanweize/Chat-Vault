@@ -159,11 +159,11 @@ export function ResearchDetailModal({ state, onClose }: Props) {
                 minWidth: 0,
               }}
             >
-              {state.title || tI18n("researchModal.report", "研究报告")}
+              {state.title || tI18n("researchModal.report")}
             </div>
             {(() => {
               const bits: string[] = [];
-              if (state.charCount && state.charCount > 0) bits.push(tI18n("chatview.words", { count: state.charCount.toLocaleString(), defaultValue: `${state.charCount.toLocaleString()} 字` }));
+              if (state.charCount && state.charCount > 0) bits.push(tI18n("chatview.words", { count: state.charCount.toLocaleString() }));
               if (state.sizeBytes && state.sizeBytes > 0) bits.push(formatBytes(state.sizeBytes));
               if (bits.length === 0) return null;
               return (
@@ -174,14 +174,14 @@ export function ResearchDetailModal({ state, onClose }: Props) {
             })()}
           </div>
           <div style={{ display: "flex", alignItems: "flex-end", gap: 2 }}>
-            {tabBtn("progress", tI18n("researchModal.progress", "调研过程"), !hasProgress)}
-            {tabBtn("report", tI18n("researchModal.reportDetails", "报告详情"), !hasReport)}
+            {tabBtn("progress", tI18n("researchModal.progress"), !hasProgress)}
+            {tabBtn("report", tI18n("researchModal.reportDetails"), !hasReport)}
           </div>
           <div style={{ width: 8 }} />
           <button
             type="button"
             onClick={onClose}
-            aria-label={tI18n("researchModal.close", "关闭")}
+            aria-label={tI18n("researchModal.close")}
             style={{
               background: "transparent",
               border: "none",
@@ -397,11 +397,11 @@ function ReportPanel({
             marginBottom: 8,
           }}
         >
-          {tI18n("researchModal.toc", "目录")}
+          {tI18n("researchModal.toc")}
         </div>
         {toc.length === 0 && md !== null && (
           <div style={{ padding: "4px 10px", color: t.textMuted, fontSize: 12 }}>
-            {tI18n("researchModal.noToc", "本报告无小节标题")}
+            {tI18n("researchModal.noToc")}
           </div>
         )}
         {toc.map((item) => {
@@ -456,11 +456,11 @@ function ReportPanel({
           {md === null && !err && (
             <div style={{ display: "flex", alignItems: "center", gap: 8, color: t.textMuted, fontSize: 13 }}>
               <SpinnerIcon color={t.textMuted} />
-              {tI18n("researchModal.loadingReport", "正在加载报告…")}
+              {tI18n("researchModal.loadingReport")}
             </div>
           )}
           {err && (
-            <div style={{ color: "#d84a3a", fontSize: 13 }}>{tI18n("researchModal.loadFailed", { err, defaultValue: `加载失败：${err}` })}</div>
+            <div style={{ color: "#d84a3a", fontSize: 13 }}>{tI18n("researchModal.loadFailed", { err })}</div>
           )}
           {md !== null && !err && (
             <div style={{ maxWidth: 780, margin: "0 auto" }}>
@@ -581,10 +581,10 @@ function ProgressPanel({
         {entries === null && !err && (
           <div style={{ display: "flex", alignItems: "center", gap: 8, color: t.textMuted, fontSize: 13 }}>
             <SpinnerIcon color={t.textMuted} />
-            {tI18n("researchModal.loadingProgress", "正在加载调研过程…")}
+            {tI18n("researchModal.loadingProgress")}
           </div>
         )}
-        {err && <div style={{ color: "#d84a3a", fontSize: 13 }}>{tI18n("researchModal.loadFailed", { err, defaultValue: `加载失败：${err}` })}</div>}
+        {err && <div style={{ color: "#d84a3a", fontSize: 13 }}>{tI18n("researchModal.loadFailed", { err })}</div>}
         {entries !== null && !err && (
           <div style={{ position: "relative" }}>
             {/* 整条贯通竖线 */}
@@ -659,7 +659,7 @@ function ProgressPanel({
                           color: t.textMuted,
                         }}
                       >
-                        {tI18n("researchModal.round", { round: g.round + 1, defaultValue: `第 ${g.round + 1} 轮` })}
+                        {tI18n("researchModal.round", { round: g.round + 1 })}
                       </div>
                     </div>
                   )}
@@ -674,7 +674,7 @@ function ProgressPanel({
               );
             })}
             {grouped.length === 0 && (
-              <div style={{ color: t.textMuted, fontSize: 13 }}>{tI18n("researchModal.noProgress", "暂无调研记录")}</div>
+              <div style={{ color: t.textMuted, fontSize: 13 }}>{tI18n("researchModal.noProgress")}</div>
             )}
           </div>
         )}
@@ -930,7 +930,7 @@ function ProgressItem({
                 flex: 1,
               }}
             >
-              {entry.filename || tI18n("researchModal.file", "文件")}
+              {entry.filename || tI18n("researchModal.file")}
             </div>
           </div>
         )}
