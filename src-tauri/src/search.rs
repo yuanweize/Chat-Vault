@@ -497,18 +497,37 @@ fn html_escape(s: &str) -> String {
 fn build_snippet(text: &str, query_lower: &str) -> String {
     const CONTEXT_CHARS: usize = 40;
 
-    let text_lower = text.to_lowercase();
-    let pos = match text_lower.find(query_lower) {
-        Some(p) => p,
+    let mut text_lower = String::new();
+    let mut lower_to_original = Vec::new();
+    for (original_offset, ch) in text.char_indices() {
+        lower_to_original.push((text_lower.len(), original_offset));
+        text_lower.extend(ch.to_lowercase());
+    }
+    lower_to_original.push((text_lower.len(), text.len()));
+
+    let lower_pos = match text_lower.find(query_lower) {
+        Some(position) => position,
         None => {
             // n-gram 匹配但原文子串不完全匹配（极少情况），返回开头
             let chars: String = text.chars().take(CONTEXT_CHARS * 2).collect();
-            return chars;
+            return html_escape(&chars);
         }
     };
 
-    // 将字节偏移对齐到字符边界
-    let match_end = pos + query_lower.len();
+    // Unicode lowercase conversion can expand one source character into
+    // multiple characters. Map the lowercase match back to safe byte
+    // boundaries in the original text before slicing it.
+    let lower_end = lower_pos + query_lower.len();
+    let pos = lower_to_original
+        .iter()
+        .rfind(|(lower_offset, _)| *lower_offset <= lower_pos)
+        .map(|(_, original_offset)| *original_offset)
+        .unwrap_or(0);
+    let match_end = lower_to_original
+        .iter()
+        .find(|(lower_offset, _)| *lower_offset >= lower_end)
+        .map(|(_, original_offset)| *original_offset)
+        .unwrap_or(text.len());
 
     // 向前取 CONTEXT_CHARS 个字符
     let start = {
@@ -554,4 +573,25 @@ fn build_snippet(text: &str, query_lower: &str) -> String {
         snippet.push_str("...");
     }
     snippet
+}
+
+#[cfg(test)]
+mod tests {
+    use super::build_snippet;
+
+    #[test]
+    fn snippets_escape_html_in_exact_and_ngram_fallback_paths() {
+        let exact = build_snippet("before <img src=x> needle after", "needle");
+        assert!(exact.contains("&lt;img src=x&gt;"));
+        assert!(exact.contains("<mark>needle</mark>"));
+
+        let fallback = build_snippet("<script>alert(1)</script>", "missing");
+        assert_eq!(fallback, "&lt;script&gt;alert(1)&lt;/script&gt;");
+    }
+
+    #[test]
+    fn snippets_handle_unicode_lowercase_expansion_without_invalid_slices() {
+        let snippet = build_snippet("AİB", "i");
+        assert_eq!(snippet, "A<mark>İ</mark>B");
+    }
 }

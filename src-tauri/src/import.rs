@@ -327,22 +327,35 @@ fn import_account_zip_impl(
     account_id: &str,
     zip_path: &Path,
 ) -> Result<String, String> {
-    use std::io::Read;
+    const MAX_ZIP_ENTRIES: usize = 200_000;
+    const MAX_ZIP_ENTRY_BYTES: u64 = 8 * 1024 * 1024 * 1024;
+    const MAX_ZIP_TOTAL_BYTES: u64 = 32 * 1024 * 1024 * 1024;
+
+    storage::validate_path_component(account_id, "accountId")?;
 
     let file = std::fs::File::open(zip_path).map_err(|e| format!("打开 ZIP 失败: {}", e))?;
     let mut archive =
         zip::ZipArchive::new(file).map_err(|e| format!("读取 ZIP 格式失败: {}", e))?;
+    if archive.len() > MAX_ZIP_ENTRIES {
+        return Err(format!("ZIP 文件条目过多（最多 {MAX_ZIP_ENTRIES} 个）"));
+    }
 
-    let tmp_id = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_millis();
-    let tmp_dir = std::env::temp_dir().join(format!("gemini_import_{}", tmp_id));
+    let tmp_dir = std::env::temp_dir().join(format!("chat_vault_import_{}", uuid::Uuid::new_v4()));
     std::fs::create_dir_all(&tmp_dir).map_err(|e| format!("创建临时目录失败: {}", e))?;
 
     let extract_result: Result<(), String> = (|| {
+        let mut extracted_bytes = 0u64;
         for i in 0..archive.len() {
             let mut entry = archive.by_index(i).str_err()?;
+            if entry.size() > MAX_ZIP_ENTRY_BYTES {
+                return Err(format!("ZIP 条目过大: {}", entry.name()));
+            }
+            extracted_bytes = extracted_bytes
+                .checked_add(entry.size())
+                .ok_or_else(|| "ZIP 解压大小溢出".to_string())?;
+            if extracted_bytes > MAX_ZIP_TOTAL_BYTES {
+                return Err("ZIP 解压后总大小超过 32 GiB 限制".to_string());
+            }
             let out_path = match entry.enclosed_name() {
                 Some(p) => tmp_dir.join(p),
                 None => continue,
@@ -353,9 +366,8 @@ fn import_account_zip_impl(
                 if let Some(parent) = out_path.parent() {
                     std::fs::create_dir_all(parent).str_err()?;
                 }
-                let mut data = Vec::new();
-                entry.read_to_end(&mut data).str_err()?;
-                std::fs::write(&out_path, &data).str_err()?;
+                let mut output = std::fs::File::create(&out_path).str_err()?;
+                std::io::copy(&mut entry, &mut output).str_err()?;
             }
         }
         Ok(())
@@ -374,7 +386,7 @@ fn import_account_zip_impl(
         }
     };
 
-    let target_dir = data_dir.join("accounts").join(account_id);
+    let target_dir = storage::account_dir(data_dir, account_id)?;
     let result = do_import(&src_dir, &target_dir);
     let _ = std::fs::remove_dir_all(&tmp_dir);
 
@@ -416,6 +428,7 @@ pub async fn import_account_zip(
     zip_path: String,
 ) -> Result<String, String> {
     let data_dir = app.path().app_data_dir().str_err()?;
+    storage::validate_path_component(&account_id, "accountId")?;
     let zip = PathBuf::from(&zip_path);
 
     let account_id_clone = account_id.clone();
@@ -425,12 +438,7 @@ pub async fn import_account_zip(
     .await
     .str_err()??;
 
-    let account_dir = app
-        .path()
-        .app_data_dir()
-        .str_err()?
-        .join("accounts")
-        .join(&account_id);
+    let account_dir = storage::account_dir(&app.path().app_data_dir().str_err()?, &account_id)?;
     let conversations_dir = account_dir.join("conversations");
     if let Ok(index) = search::open_or_create_index(&account_dir) {
         let _ = search::index_all(&index, &account_dir, &conversations_dir);

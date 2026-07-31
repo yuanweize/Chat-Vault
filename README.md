@@ -44,6 +44,8 @@ Linux is not currently a supported release target.
 - Chat Vault communicates directly with Google Gemini to synchronize the account selected by the user. It does not use a Chat Vault cloud service or analytics backend.
 - The optional password is an **application access lock**, not disk encryption. Conversation and media files remain readable to software or users that can access your operating-system account. Use FileVault or BitLocker when encryption at rest is required.
 - Password verifiers use a random salt and PBKDF2-SHA256. Existing legacy SHA-256 verifiers are migrated after a successful unlock.
+- Gemini HTML and search highlights are sanitized before DOM rendering; local account, conversation, and media paths are validated at both frontend and backend boundaries.
+- ZIP restores are streamed to disk and bounded by entry-count and extracted-size limits to avoid unbounded memory or disk use.
 - Exported ZIP, Markdown, JSON, and media files contain private conversation data. Store and share them accordingly.
 
 ## Installation

@@ -17,11 +17,13 @@ pub(crate) fn resolve_account_id_arg(
     account_id: Option<String>,
     account_id_camel: Option<String>,
 ) -> Result<String, String> {
-    account_id
+    let account_id = account_id
         .or(account_id_camel)
         .map(|s| s.trim().to_string())
         .filter(|s| !s.is_empty())
-        .ok_or_else(|| "缺少 account_id/accountId 参数".to_string())
+        .ok_or_else(|| "缺少 account_id/accountId 参数".to_string())?;
+    storage::validate_path_component(&account_id, "accountId")?;
+    Ok(account_id)
 }
 
 pub(crate) fn value_to_non_empty_string(v: Option<&serde_json::Value>) -> Option<String> {
@@ -293,7 +295,7 @@ pub fn get_account_range_bytes(
 ) -> Result<String, String> {
     let account_id = resolve_account_id_arg(account_id, accountId)?;
     let data_dir = app.path().app_data_dir().str_err()?;
-    let account_dir = data_dir.join("accounts").join(&account_id);
+    let account_dir = storage::account_dir(&data_dir, &account_id)?;
     if !account_dir.exists() {
         return Err(format!("账号目录不存在: {}", account_id));
     }
@@ -349,7 +351,7 @@ pub fn get_account_range_bytes(
                     if let Some(atts) = obj.get("attachments").and_then(|v| v.as_array()) {
                         for att in atts {
                             if let Some(mid) = att.get("mediaId").and_then(|v| v.as_str()) {
-                                if !mid.is_empty() {
+                                if storage::validate_path_component(mid, "mediaId").is_ok() {
                                     media_ids.push(mid.to_string());
                                 }
                             }
@@ -387,7 +389,7 @@ pub fn get_account_export_stats(
 ) -> Result<String, String> {
     let account_id = resolve_account_id_arg(account_id, accountId)?;
     let data_dir = app.path().app_data_dir().str_err()?;
-    let account_dir = data_dir.join("accounts").join(&account_id);
+    let account_dir = storage::account_dir(&data_dir, &account_id)?;
     if !account_dir.exists() {
         return Err(format!("账号目录不存在: {}", account_id));
     }
@@ -405,7 +407,7 @@ pub fn export_account_zip(
 ) -> Result<String, String> {
     let account_id = resolve_account_id_arg(account_id, accountId)?;
     let data_dir = app.path().app_data_dir().str_err()?;
-    let account_dir = data_dir.join("accounts").join(&account_id);
+    let account_dir = storage::account_dir(&data_dir, &account_id)?;
     if !account_dir.exists() {
         return Err(format!("账号目录不存在: {}", account_id));
     }
@@ -694,6 +696,9 @@ fn parse_kelivo_jsonl(
     let media_bytes: u64 = media_ids
         .iter()
         .filter_map(|mid| {
+            if storage::validate_path_component(mid, "mediaId").is_err() {
+                return None;
+            }
             let p = media_dir.join(mid);
             p.metadata().ok().map(|m| m.len())
         })
@@ -834,6 +839,10 @@ fn write_kelivo_zip(
     let mut media_found = 0usize;
     let mut media_missing = 0usize;
     for mid in &all_mids {
+        if storage::validate_path_component(mid, "mediaId").is_err() {
+            media_missing += 1;
+            continue;
+        }
         let src = media_dir.join(mid);
         if src.exists() {
             let opts = if should_store(&src) {
@@ -863,7 +872,7 @@ fn kelivo_export_impl(
     media_limit: Option<u64>,
     after_date: Option<&str>,
 ) -> Result<String, String> {
-    let account_dir = data_dir.join("accounts").join(account_id);
+    let account_dir = storage::account_dir(data_dir, account_id)?;
     let conv_dir = account_dir.join("conversations");
     let media_dir = account_dir.join("media");
 

@@ -18,9 +18,6 @@
       "identifier": "opener:allow-open-url",
       "allow": [
         {
-          "url": "file://**"
-        },
-        {
           "url": "https://**"
         }
       ]

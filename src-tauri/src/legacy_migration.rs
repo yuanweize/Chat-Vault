@@ -346,16 +346,31 @@ fn copy_legacy_archive(
     }
     let _ = std::fs::remove_dir(&staging_dir);
 
+    // The swap is complete. Old Chat Vault account stubs are no longer needed;
+    // remove their temporary backups without turning a successful migration
+    // into a retryable failure if the OS keeps a file handle open briefly.
+    if backup_accounts.exists() {
+        if let Err(error) = std::fs::remove_dir_all(&backup_accounts) {
+            log::warn!("Could not remove legacy migration account backup: {error}");
+        }
+    }
+    if backup_registry.exists() {
+        if let Err(error) = std::fs::remove_file(&backup_registry) {
+            log::warn!("Could not remove legacy migration registry backup: {error}");
+        }
+    }
+
     let marker = serde_json::json!({
         "source": LEGACY_IDENTIFIER,
         "migratedAt": chrono::Utc::now().to_rfc3339(),
         "conversationCount": info.conversation_count,
     });
-    std::fs::write(
+    if let Err(error) = std::fs::write(
         current_data_dir.join("legacy_migration.json"),
         serde_json::to_string_pretty(&marker).str_err()?,
-    )
-    .str_err()?;
+    ) {
+        log::warn!("Could not write the legacy migration marker: {error}");
+    }
 
     Ok(LegacyMigrationResult {
         account_count: info.account_count,
@@ -511,6 +526,14 @@ mod tests {
         assert!(!migrated.join("sync_state.json").exists());
         assert!(!migrated.join("search_mtimes.json").exists());
         assert!(!migrated.join("search_index").exists());
+        assert!(current.join("legacy_migration.json").is_file());
+        assert!(std::fs::read_dir(&current).unwrap().all(|entry| {
+            !entry
+                .unwrap()
+                .file_name()
+                .to_string_lossy()
+                .starts_with(".pre-legacy-migration-")
+        }));
         assert!(legacy
             .join("accounts/test_example_com/conversations/example.jsonl")
             .is_file());

@@ -71,7 +71,7 @@ impl GeminiExporter {
 
         let account_info = self.resolve_account_info_readonly().await?;
         let account_id = &account_info["id"].as_str().unwrap_or("").to_string();
-        let account_dir = base_dir.join("accounts").join(account_id);
+        let account_dir = storage::account_dir(&base_dir, account_id)?;
         let conv_dir = account_dir.join("conversations");
         let media_dir = account_dir.join("media");
 
@@ -558,7 +558,7 @@ impl GeminiExporter {
 
         let account_info = self.resolve_account_info_readonly().await?;
         let account_id = account_info["id"].as_str().unwrap_or("").to_string();
-        let account_dir = base_dir.join("accounts").join(&account_id);
+        let account_dir = storage::account_dir(&base_dir, &account_id)?;
         let conv_dir = account_dir.join("conversations");
         let media_dir = account_dir.join("media");
 
@@ -566,6 +566,7 @@ impl GeminiExporter {
         std::fs::create_dir_all(&media_dir).str_err()?;
 
         let bare_id = crate::protocol::strip_c_prefix(conversation_id);
+        storage::validate_path_component(&bare_id, "conversationId")?;
         let conv_id = crate::protocol::ensure_c_prefix(conversation_id);
         let jsonl_file = conv_dir.join(format!("{}.jsonl", bare_id));
         let local_jsonl_exists = jsonl_file.exists();
@@ -619,7 +620,7 @@ impl GeminiExporter {
 
         // 抓取详情（逐页拉取，每页更新索引中的条数）
         let existing_turn_ids = if local_jsonl_exists {
-            storage::build_existing_turn_id_set_new(&jsonl_file)
+            storage::load_existing_turn_ids(&jsonl_file)
         } else {
             HashSet::new()
         };

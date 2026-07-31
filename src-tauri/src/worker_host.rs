@@ -21,6 +21,7 @@ use crate::cookies;
 use crate::gemini_api::GeminiExporter;
 use crate::protocol;
 use crate::search;
+use crate::storage;
 use crate::str_err::ToStringErr;
 use crate::sync::CancellationToken;
 
@@ -43,9 +44,7 @@ pub struct EnqueueJobRequest {
 
 impl EnqueueJobRequest {
     fn validate(&self) -> Result<(), String> {
-        if self.account_id.trim().is_empty() {
-            return Err("accountId 不能为空".to_string());
-        }
+        storage::validate_path_component(self.account_id.trim(), "accountId")?;
         match self.job_type.as_str() {
             "sync_list" | "sync_full" | "sync_incremental" => Ok(()),
             "sync_conversation" => {
@@ -57,7 +56,7 @@ impl EnqueueJobRequest {
                 if conv_id.is_empty() {
                     Err("sync_conversation 需要 conversationId".to_string())
                 } else {
-                    Ok(())
+                    storage::validate_path_component(conv_id, "conversationId")
                 }
             }
             _ => Err(format!("不支持的任务类型: {}", self.job_type)),
@@ -390,7 +389,7 @@ impl WorkerHost {
             .await?;
 
         // 同步成功后更新搜索索引
-        let account_dir = self.output_dir.join("accounts").join(&account_id);
+        let account_dir = storage::account_dir(&self.output_dir, &account_id)?;
         index_single_conversation(&account_dir, &conversation_id);
 
         Ok(result)
@@ -586,10 +585,7 @@ impl WorkerHost {
         }
 
         // batch 结束后合并索引 segment
-        let account_dir = self
-            .output_dir
-            .join("accounts")
-            .join(&parent_ctx.account_id);
+        let account_dir = storage::account_dir(&self.output_dir, &parent_ctx.account_id)?;
         if !succeeded.is_empty() {
             if let Ok(index) = search::open_or_create_index(&account_dir) {
                 let _ = search::merge_segments(&index);
@@ -825,10 +821,10 @@ fn extract_string_vec(value: &Value, key: &str) -> Vec<String> {
 
 /// 读取 conversations.json 的 items
 fn load_conversation_items(output_dir: &Path, account_id: &str) -> Vec<Value> {
-    let conv_index = output_dir
-        .join("accounts")
-        .join(account_id)
-        .join("conversations.json");
+    let Ok(account_dir) = storage::account_dir(output_dir, account_id) else {
+        return Vec::new();
+    };
+    let conv_index = account_dir.join("conversations.json");
     std::fs::read_to_string(&conv_index)
         .ok()
         .and_then(|c| serde_json::from_str::<Value>(&c).ok())
@@ -870,10 +866,10 @@ fn collect_failed_conversation_ids(
     account_id: &str,
     items: &[Value],
 ) -> Vec<String> {
-    let conv_dir = output_dir
-        .join("accounts")
-        .join(account_id)
-        .join("conversations");
+    let Ok(account_dir) = storage::account_dir(output_dir, account_id) else {
+        return Vec::new();
+    };
+    let conv_dir = account_dir.join("conversations");
     let mut ids = std::collections::HashSet::new();
 
     let item_map: HashMap<String, &Value> = items
@@ -952,6 +948,10 @@ fn collect_empty_conversation_ids(items: &[Value]) -> Vec<String> {
 /// 对单个会话执行搜索索引更新（同步成功后调用）
 fn index_single_conversation(account_dir: &Path, conversation_id: &str) {
     let bare_id = protocol::strip_c_prefix(conversation_id);
+    if storage::validate_path_component(&bare_id, "conversationId").is_err() {
+        log::warn!("Skipped indexing an invalid conversation ID");
+        return;
+    }
     let jsonl_path = account_dir
         .join("conversations")
         .join(format!("{}.jsonl", bare_id));

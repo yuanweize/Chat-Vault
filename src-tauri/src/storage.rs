@@ -6,7 +6,7 @@ use anyhow::Result;
 use chrono::Utc;
 use serde_json::{json, Value};
 use std::collections::{HashMap, HashSet};
-use std::path::Path;
+use std::path::{Component, Path, PathBuf};
 use uuid::Uuid;
 
 // ============================================================================
@@ -15,6 +15,50 @@ use uuid::Uuid;
 pub const CONVERSATION_STATUS_NORMAL: &str = "normal";
 pub const CONVERSATION_STATUS_LOST: &str = "lost";
 pub const CONVERSATION_STATUS_HIDDEN: &str = "hidden";
+
+/// Reject values that could escape a single filename/directory component.
+///
+/// Tauri command arguments originate in the WebView, so they must not be
+/// trusted when constructing paths below the application data directory.
+pub fn validate_path_component(value: &str, label: &str) -> std::result::Result<(), String> {
+    let trimmed = value.trim();
+    let mut components = Path::new(trimmed).components();
+    let is_single_normal =
+        matches!(components.next(), Some(Component::Normal(_))) && components.next().is_none();
+    if trimmed.is_empty()
+        || trimmed.len() > 255
+        || trimmed.contains(['/', '\\', '\0'])
+        || trimmed == "."
+        || trimmed == ".."
+        || !is_single_normal
+    {
+        return Err(format!("{label} contains an invalid path component"));
+    }
+    Ok(())
+}
+
+pub fn account_dir(base_dir: &Path, account_id: &str) -> std::result::Result<PathBuf, String> {
+    validate_path_component(account_id, "accountId")?;
+    Ok(base_dir.join("accounts").join(account_id))
+}
+
+pub fn join_safe_relative(
+    base_dir: &Path,
+    relative: &str,
+    label: &str,
+) -> std::result::Result<PathBuf, String> {
+    let trimmed = relative.trim();
+    if trimmed.is_empty() || trimmed.contains(['\\', '\0']) {
+        return Err(format!("{label} is not a safe relative path"));
+    }
+    let safe = Path::new(trimmed)
+        .components()
+        .all(|component| matches!(component, Component::Normal(_)));
+    if !safe {
+        return Err(format!("{label} is not a safe relative path"));
+    }
+    Ok(base_dir.join(trimmed))
+}
 
 // ============================================================================
 // JSONL 读写与去重
@@ -387,26 +431,7 @@ pub fn update_jsonl_media_failure_flags(
 // Turn ID / 行集合工具
 // ============================================================================
 
-pub fn build_existing_turn_id_set(existing_rows: &[Value]) -> HashSet<String> {
-    existing_rows
-        .iter()
-        .filter_map(|row| {
-            row.as_object()?
-                .get("turn_id")?
-                .as_str()
-                .filter(|s| !s.is_empty())
-                .map(|s| s.to_string())
-        })
-        .collect()
-}
-
-pub fn latest_ts_from_rows(rows: &[Value]) -> Option<i64> {
-    rows.iter()
-        .filter_map(|row| row.as_object()?.get("timestamp")?.as_i64())
-        .max()
-}
-
-pub fn build_existing_turn_id_set_new(jsonl_file: &Path) -> HashSet<String> {
+pub fn load_existing_turn_ids(jsonl_file: &Path) -> HashSet<String> {
     let mut ids = HashSet::new();
     if !jsonl_file.exists() {
         return ids;
@@ -434,22 +459,6 @@ pub fn build_existing_turn_id_set_new(jsonl_file: &Path) -> HashSet<String> {
         }
     }
     ids
-}
-
-pub fn count_message_rows_new(jsonl_file: &Path) -> usize {
-    if !jsonl_file.exists() {
-        return 0;
-    }
-    let content = match std::fs::read_to_string(jsonl_file) {
-        Ok(c) => c,
-        Err(_) => return 0,
-    };
-    content
-        .lines()
-        .filter(|l| !l.trim().is_empty())
-        .filter_map(|l| serde_json::from_str::<Value>(l).ok())
-        .filter(|row| row.get("type").and_then(|v| v.as_str()) == Some("message"))
-        .count()
 }
 
 pub fn count_media_types_from_rows(rows: &[Value]) -> (usize, usize, usize) {
@@ -505,22 +514,6 @@ pub fn rows_has_failed_data(rows: &[Value]) -> bool {
         }
     }
     false
-}
-
-pub fn remote_hash_from_jsonl(jsonl_file: &Path) -> Option<String> {
-    if !jsonl_file.exists() {
-        return None;
-    }
-    let content = std::fs::read_to_string(jsonl_file).ok()?;
-    let first_line = content.lines().next()?.trim();
-    if first_line.is_empty() {
-        return None;
-    }
-    let row: Value = serde_json::from_str(first_line).ok()?;
-    if row.get("type")?.as_str()? != "meta" {
-        return None;
-    }
-    row.get("remoteHash")?.as_str().map(|s| s.to_string())
 }
 
 // ============================================================================
@@ -1276,6 +1269,31 @@ mod tests {
     use super::*;
     use std::io::Write;
     use tempfile::NamedTempFile;
+
+    #[test]
+    fn path_components_reject_directory_traversal() {
+        for invalid in ["", ".", "..", "../other", "other/file", "other\\file"] {
+            assert!(validate_path_component(invalid, "id").is_err(), "{invalid}");
+        }
+        for valid in ["account_1", "c_abc-123", "report.final.md", "中文-id"] {
+            assert!(validate_path_component(valid, "id").is_ok(), "{valid}");
+        }
+    }
+
+    #[test]
+    fn relative_paths_stay_below_the_requested_base() {
+        let base = Path::new("/tmp/chat-vault-test");
+        assert_eq!(
+            join_safe_relative(base, "accounts/account_1", "dataDir").unwrap(),
+            base.join("accounts/account_1")
+        );
+        for invalid in ["", ".", "../other", "/absolute", "accounts\\other"] {
+            assert!(
+                join_safe_relative(base, invalid, "dataDir").is_err(),
+                "{invalid}"
+            );
+        }
+    }
 
     #[test]
     fn test_read_write_jsonl() {

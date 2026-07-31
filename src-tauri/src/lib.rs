@@ -75,7 +75,10 @@ fn read_account_registry_entry(
 }
 
 fn is_list_sync_pending(data_dir: &Path, data_dir_rel: &str) -> bool {
-    let sync_file = data_dir.join(data_dir_rel).join("sync_state.json");
+    let Ok(account_dir) = storage::join_safe_relative(data_dir, data_dir_rel, "dataDir") else {
+        return false;
+    };
+    let sync_file = account_dir.join("sync_state.json");
     if !sync_file.exists() {
         return false;
     }
@@ -114,6 +117,7 @@ fn conversation_meta_info(jsonl_file: &Path) -> (bool, Option<String>) {
 
 /// 读取对话 JSONL，收集媒体 ID，删除 JSONL 文件，并清理对应媒体文件和 manifest。
 fn delete_jsonl_and_media(account_dir: &Path, bare_id: &str) -> Result<(), String> {
+    storage::validate_path_component(bare_id, "conversationId")?;
     let conv_file = account_dir
         .join("conversations")
         .join(format!("{}.jsonl", bare_id));
@@ -129,7 +133,7 @@ fn delete_jsonl_and_media(account_dir: &Path, bare_id: &str) -> Result<(), Strin
                     if let Some(atts) = row.get("attachments").and_then(|v| v.as_array()) {
                         for att in atts {
                             if let Some(mid) = att.get("mediaId").and_then(|v| v.as_str()) {
-                                if !mid.is_empty() {
+                                if storage::validate_path_component(mid, "mediaId").is_ok() {
                                     media_ids.insert(mid.to_string());
                                 }
                             }
@@ -166,7 +170,7 @@ fn delete_conversation(
     conversation_id: String,
 ) -> Result<(), String> {
     let data_dir = app.path().app_data_dir().str_err()?;
-    let account_dir = data_dir.join("accounts").join(&account_id);
+    let account_dir = storage::account_dir(&data_dir, &account_id)?;
     let bare_id = protocol::strip_c_prefix(&conversation_id);
 
     // 1. 清理 JSONL 和关联媒体文件
@@ -229,7 +233,7 @@ fn clear_conversation_data(
     conversation_id: String,
 ) -> Result<(), String> {
     let data_dir = app.path().app_data_dir().str_err()?;
-    let account_dir = data_dir.join("accounts").join(&account_id);
+    let account_dir = storage::account_dir(&data_dir, &account_id)?;
     let bare_id = protocol::strip_c_prefix(&conversation_id);
 
     // 1. 清理 JSONL 和关联媒体文件
@@ -280,7 +284,7 @@ fn clear_account_data(
         .ok_or_else(|| "缺少 account_id/accountId 参数".to_string())?;
 
     let data_dir = app.path().app_data_dir().str_err()?;
-    let account_dir = data_dir.join("accounts").join(&account_id);
+    let account_dir = storage::account_dir(&data_dir, &account_id)?;
     let conversations_dir = account_dir.join("conversations");
     let media_dir = account_dir.join("media");
     let conversations_file = account_dir.join("conversations.json");
@@ -414,9 +418,25 @@ fn load_accounts(app: tauri::AppHandle) -> Result<String, String> {
 
     let mut result: Vec<serde_json::Value> = Vec::new();
     for entry in &entries {
-        let data_dir_rel = entry.get("dataDir").and_then(|v| v.as_str()).unwrap_or("");
+        let Some(id) = entry.get("id").and_then(|v| v.as_str()) else {
+            continue;
+        };
+        if storage::validate_path_component(id, "accountId").is_err() {
+            log::warn!("Skipped an account registry entry with an invalid ID");
+            continue;
+        }
+        let default_data_dir = format!("accounts/{id}");
+        let data_dir_rel = entry
+            .get("dataDir")
+            .and_then(|v| v.as_str())
+            .unwrap_or(&default_data_dir);
+        let Ok(account_dir) = storage::join_safe_relative(&data_dir, data_dir_rel, "dataDir")
+        else {
+            log::warn!("Skipped an account registry entry with an unsafe dataDir");
+            continue;
+        };
         let list_sync_pending = is_list_sync_pending(&data_dir, data_dir_rel);
-        let meta_file = data_dir.join(data_dir_rel).join("meta.json");
+        let meta_file = account_dir.join("meta.json");
 
         if meta_file.exists() {
             if let Ok(s) = std::fs::read_to_string(&meta_file) {
@@ -434,10 +454,6 @@ fn load_accounts(app: tauri::AppHandle) -> Result<String, String> {
         }
 
         // meta.json missing — build minimal entry from registry
-        let id = entry
-            .get("id")
-            .and_then(|v| v.as_str())
-            .unwrap_or("unknown");
         let email = entry.get("email").and_then(|v| v.as_str()).unwrap_or("");
         let authuser = entry.get("authuser").and_then(|v| v.as_str());
         let name = email.split('@').next().unwrap_or(id);
@@ -668,7 +684,7 @@ async fn open_google_login(app: tauri::AppHandle) -> Result<String, String> {
         "写入账号数据: account_id={}",
         protocol::mask_email(&account_id)
     );
-    let account_dir = data_dir.join("accounts").join(&account_id);
+    let account_dir = storage::account_dir(&data_dir, &account_id)?;
     std::fs::create_dir_all(account_dir.join("conversations")).str_err()?;
     std::fs::create_dir_all(account_dir.join("media")).str_err()?;
 
@@ -762,7 +778,7 @@ async fn run_accounts_import(app: tauri::AppHandle) -> Result<String, String> {
     let mut imported_ids: Vec<String> = Vec::new();
     for m in &mappings {
         let account_id = protocol::email_to_account_id(&m.email);
-        let account_dir = data_dir.join("accounts").join(&account_id);
+        let account_dir = storage::account_dir(&data_dir, &account_id)?;
         std::fs::create_dir_all(account_dir.join("conversations")).str_err()?;
         std::fs::create_dir_all(account_dir.join("media")).str_err()?;
 
@@ -849,7 +865,7 @@ async fn reload_accounts_import(app: tauri::AppHandle) -> Result<String, String>
 
     for m in &mappings {
         let account_id = protocol::email_to_account_id(&m.email);
-        let account_dir = data_dir.join("accounts").join(&account_id);
+        let account_dir = storage::account_dir(&data_dir, &account_id)?;
         std::fs::create_dir_all(account_dir.join("conversations")).str_err()?;
         std::fs::create_dir_all(account_dir.join("media")).str_err()?;
 
@@ -969,11 +985,8 @@ fn load_conversation_summaries(
     account_id: String,
 ) -> Result<String, String> {
     let data_dir = app.path().app_data_dir().str_err()?;
-    let account_dir = data_dir.join("accounts").join(&account_id);
-    let conv_file = data_dir
-        .join("accounts")
-        .join(&account_id)
-        .join("conversations.json");
+    let account_dir = storage::account_dir(&data_dir, &account_id)?;
+    let conv_file = account_dir.join("conversations.json");
 
     if !conv_file.exists() {
         return Ok("[]".to_string());
@@ -1011,6 +1024,11 @@ fn load_conversation_summaries(
             continue;
         }
 
+        if storage::validate_path_component(cid, "conversationId").is_err() {
+            obj.insert("hasFailedData".to_string(), serde_json::Value::Bool(false));
+            continue;
+        }
+
         let (has_failed_data, created_at) =
             conversation_meta_info(&conversations_dir.join(format!("{}.jsonl", cid)));
         obj.insert(
@@ -1029,7 +1047,7 @@ fn load_conversation_summaries(
 #[tauri::command]
 fn get_account_media_dir(app: tauri::AppHandle, account_id: String) -> Result<String, String> {
     let data_dir = app.path().app_data_dir().str_err()?;
-    let media_dir = data_dir.join("accounts").join(account_id).join("media");
+    let media_dir = storage::account_dir(&data_dir, &account_id)?.join("media");
     Ok(media_dir.to_string_lossy().to_string())
 }
 
@@ -1041,9 +1059,8 @@ fn read_media_file(
     media_id: String,
 ) -> Result<String, String> {
     let data_dir = app.path().app_data_dir().str_err()?;
-    let file_path = data_dir
-        .join("accounts")
-        .join(account_id)
+    storage::validate_path_component(&media_id, "mediaId")?;
+    let file_path = storage::account_dir(&data_dir, &account_id)?
         .join("media")
         .join(&media_id);
     std::fs::read_to_string(&file_path)
@@ -1059,13 +1076,14 @@ fn update_search_index(
     conversation_ids: Vec<String>,
 ) -> Result<String, String> {
     let data_dir = app.path().app_data_dir().str_err()?;
-    let account_dir = data_dir.join("accounts").join(&account_id);
+    let account_dir = storage::account_dir(&data_dir, &account_id)?;
     let conversations_dir = account_dir.join("conversations");
 
     let index = search::open_or_create_index(&account_dir)?;
     let mut indexed = 0u32;
     for cid in &conversation_ids {
         let bare = protocol::strip_c_prefix(cid);
+        storage::validate_path_component(&bare, "conversationId")?;
         let jsonl = conversations_dir.join(format!("{}.jsonl", bare));
         if jsonl.exists() {
             search::index_conversation(&index, &account_dir, &bare, &jsonl)?;
@@ -1083,17 +1101,17 @@ fn search_conversations(
     limit: Option<u32>,
 ) -> Result<String, String> {
     let data_dir = app.path().app_data_dir().str_err()?;
-    let account_dir = data_dir.join("accounts").join(&account_id);
+    let account_dir = storage::account_dir(&data_dir, &account_id)?;
 
     let index = search::open_or_create_index(&account_dir)?;
-    let results = search::search_messages(&index, &query, limit.unwrap_or(50))?;
+    let results = search::search_messages(&index, &query, limit.unwrap_or(50).clamp(1, 200))?;
     serde_json::to_string(&results).str_err()
 }
 
 #[tauri::command]
 fn rebuild_search_index(app: tauri::AppHandle, account_id: String) -> Result<String, String> {
     let data_dir = app.path().app_data_dir().str_err()?;
-    let account_dir = data_dir.join("accounts").join(&account_id);
+    let account_dir = storage::account_dir(&data_dir, &account_id)?;
     let conversations_dir = account_dir.join("conversations");
 
     // 删除旧索引强制重建
@@ -1124,10 +1142,10 @@ fn load_conversation_detail(
     if bare_id.is_empty() {
         return Ok("null".to_string());
     }
+    storage::validate_path_component(&bare_id, "conversationId")?;
 
-    let jsonl_file = data_dir
-        .join("accounts")
-        .join(&account_id)
+    let account_dir = storage::account_dir(&data_dir, &account_id)?;
+    let jsonl_file = account_dir
         .join("conversations")
         .join(format!("{}.jsonl", bare_id));
 
@@ -1197,14 +1215,14 @@ fn load_conversation_detail(
     };
 
     // 为每个 attachment 注入 size 字段（从 media 目录查找文件大小）
-    let media_dir = data_dir.join("accounts").join(&account_id).join("media");
+    let media_dir = account_dir.join("media");
     for msg in messages.iter_mut() {
         if let Some(atts) = msg.get_mut("attachments").and_then(|v| v.as_array_mut()) {
             for att in atts.iter_mut() {
                 if let Some(obj) = att.as_object_mut() {
                     if !obj.contains_key("size") {
                         if let Some(media_id) = obj.get("mediaId").and_then(|v| v.as_str()) {
-                            if !media_id.is_empty() {
+                            if storage::validate_path_component(media_id, "mediaId").is_ok() {
                                 let file_path = media_dir.join(media_id);
                                 if let Ok(meta_fs) = std::fs::metadata(&file_path) {
                                     obj.insert(
@@ -1266,7 +1284,7 @@ async fn get_folders(
     account_id: String,
 ) -> Result<Vec<serde_json::Value>, String> {
     let data_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
-    let account_dir = data_dir.join("accounts").join(&account_id);
+    let account_dir = storage::account_dir(&data_dir, &account_id)?;
     Ok(crate::storage::load_folders(&account_dir))
 }
 
@@ -1277,7 +1295,7 @@ async fn save_folders(
     folders: Vec<serde_json::Value>,
 ) -> Result<(), String> {
     let data_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
-    let account_dir = data_dir.join("accounts").join(&account_id);
+    let account_dir = storage::account_dir(&data_dir, &account_id)?;
     crate::storage::save_folders(&account_dir, &folders).map_err(|e| e.to_string())?;
     Ok(())
 }
@@ -1290,7 +1308,11 @@ async fn set_conversation_folder(
     folder_id: Option<String>,
 ) -> Result<(), String> {
     let data_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
-    let account_dir = data_dir.join("accounts").join(&account_id);
+    let account_dir = storage::account_dir(&data_dir, &account_id)?;
+    storage::validate_path_component(
+        protocol::strip_c_prefix(&conversation_id).as_str(),
+        "conversationId",
+    )?;
     crate::storage::set_conversation_folder(&account_dir, &conversation_id, folder_id.as_deref())
         .map_err(|e| e.to_string())?;
     Ok(())

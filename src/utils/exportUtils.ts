@@ -4,6 +4,7 @@ import { appDataDir, join } from "@tauri-apps/api/path";
 import { openPath } from "@tauri-apps/plugin-opener";
 import { Conversation } from "../data/types";
 import i18n from "../i18n";
+import { isSafePathComponent } from "./safePath";
 
 function safeFileName(value: string): string {
   const normalized = value
@@ -29,6 +30,9 @@ export function formatBytes(bytes: number): string {
 
 export async function exportConversationToZip(conversation: Conversation, accountId: string) {
   try {
+    if (!isSafePathComponent(accountId)) {
+      throw new Error(i18n.t("app.exportFailed"));
+    }
     const { default: JSZip } = await import("jszip");
     const baseDir = await appDataDir();
     const bareId = conversation.id.replace(/^c_/, "");
@@ -55,17 +59,17 @@ export async function exportConversationToZip(conversation: Conversation, accoun
     for (const msg of conversation.messages) {
       if (msg.attachments) {
         for (const att of msg.attachments) {
-          if (att.mediaId) {
+          if (att.mediaId && isSafePathComponent(att.mediaId)) {
             mediaIds.add(att.mediaId);
           }
-          if (att.previewMediaId) mediaIds.add(att.previewMediaId);
+          if (att.previewMediaId && isSafePathComponent(att.previewMediaId)) mediaIds.add(att.previewMediaId);
         }
       }
       for (const canvas of msg.canvas ?? []) {
-        if (canvas.content_media_id) mediaIds.add(canvas.content_media_id);
+        if (canvas.content_media_id && isSafePathComponent(canvas.content_media_id)) mediaIds.add(canvas.content_media_id);
       }
-      if (msg.deepResearch?.report_media_id) mediaIds.add(msg.deepResearch.report_media_id);
-      if (msg.deepResearch?.progress_media_id) mediaIds.add(msg.deepResearch.progress_media_id);
+      if (msg.deepResearch?.report_media_id && isSafePathComponent(msg.deepResearch.report_media_id)) mediaIds.add(msg.deepResearch.report_media_id);
+      if (msg.deepResearch?.progress_media_id && isSafePathComponent(msg.deepResearch.progress_media_id)) mediaIds.add(msg.deepResearch.progress_media_id);
     }
 
     // Read media files and add to zip
@@ -110,6 +114,9 @@ export async function exportConversationToZip(conversation: Conversation, accoun
 
 export async function openExportDirectory(accountId: string) {
   try {
+    if (!isSafePathComponent(accountId)) {
+      throw new Error(i18n.t("app.exportFailed"));
+    }
     const baseDir = await appDataDir();
 
     

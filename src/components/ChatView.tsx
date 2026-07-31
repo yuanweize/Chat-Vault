@@ -5,6 +5,7 @@ import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
 import rehypeKatex from "rehype-katex";
 import rehypeRaw from "rehype-raw";
+import rehypeSanitize from "rehype-sanitize";
 import "katex/dist/katex.min.css";
 import { Virtuoso, VirtuosoHandle } from "react-virtuoso";
 import { useTranslation } from "react-i18next";
@@ -30,6 +31,7 @@ import { Attachment, Conversation, ConvMessage } from "../data/types";
 import { useTheme } from "../theme";
 import { CopyIcon, CheckIcon, ChevronRightIcon, DocIcon, SparkIcon, SearchIcon, ExternalLinkIcon, MessageIcon } from "./Icons";
 import { ResearchDetailModal, ResearchModalState } from "./ResearchDetailModal";
+import { isSafePathComponent } from "../utils/safePath";
 
 const loadedImageUrlCache = new Set<string>();
 
@@ -45,7 +47,7 @@ function getKind(mimeType: string): "image" | "video" | "audio" | "file" {
 }
 
 function buildUrl(mediaId: string, mediaDir?: string, cacheKey?: string): string {
-  if (!mediaDir || !mediaId) return "";
+  if (!mediaDir || !isSafePathComponent(mediaId)) return "";
   const base = convertFileSrc(`${mediaDir}/${mediaId}`);
   if (!cacheKey) return base;
   return `${base}?v=${encodeURIComponent(cacheKey)}`;
@@ -1445,7 +1447,7 @@ export function AIMarkdown({
     <div className={`prose-ai${isDark ? " prose-dark" : ""}`}>
       <ReactMarkdown
         remarkPlugins={[remarkGfm, remarkMath]}
-        rehypePlugins={[rehypeRaw, rehypeKatex]}
+        rehypePlugins={[rehypeRaw, rehypeSanitize, rehypeKatex]}
         components={{ ...baseComponents, ...extraComponents }}
       >
         {fixMarkdown(text)}
@@ -1515,7 +1517,9 @@ function CanvasBubble({
   const t = useTheme();
   const { t: tI18n } = useTranslation();
   const [hovered, setHovered] = useState(false);
-  const absPath = mediaDir && canvas.content_media_id ? `${mediaDir}/${canvas.content_media_id}` : "";
+  const absPath = mediaDir && canvas.content_media_id && isSafePathComponent(canvas.content_media_id)
+    ? `${mediaDir}/${canvas.content_media_id}`
+    : "";
   const disabled = !absPath;
   const bytes = canvas.size_bytes ?? 0;
   const metaText = bytes > 0 ? formatBytes(bytes) : "";
@@ -1523,16 +1527,10 @@ function CanvasBubble({
 
   async function handleOpen() {
     if (disabled) return;
-    const fileUrl = `file://${absPath}`;
     try {
-      await openUrl(fileUrl);
-    } catch (err) {
-      console.error("openUrl(file://) failed, fallback to openPath:", err);
-      try {
-        await openPath(absPath);
-      } catch (err2) {
-        console.error("openPath fallback failed:", err2);
-      }
+      await openPath(absPath);
+    } catch (error) {
+      console.error("openPath failed:", error);
     }
   }
 

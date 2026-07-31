@@ -11,7 +11,11 @@
 - Added one-time stale WebView asset cleanup for upgraded installations.
 - Upgraded local access password verification to salted PBKDF2-SHA256 while preserving legacy verifier migration.
 - Improved export/import handling, media inclusion, filename safety, and account clearing safeguards.
-- Updated dependency versions and security posture, including Tantivy 0.26.x and stricter CSP.
+- Added uniform path-component validation for account, conversation, and media identifiers across the WebView and Rust command boundary.
+- Made ZIP restore streaming and bounded (entry count, per-file size, and total extracted size) to prevent memory and disk exhaustion.
+- Sanitized rendered Gemini HTML and search snippets before they reach the DOM.
+- Restricted the asset protocol to Chat Vault's app-data directory and removed inline-script permission from the production CSP.
+- Updated dependency versions and security posture, including Tantivy 0.26.x; production and development npm audits now report zero known vulnerabilities.
 - Added maintained project structure documentation.
 
 ## Verification
@@ -23,6 +27,8 @@ npm run build
 cargo test --manifest-path src-tauri/Cargo.toml
 cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
 cargo fmt --manifest-path src-tauri/Cargo.toml -- --check
+npm audit
+cargo audit --file src-tauri/Cargo.lock --no-fetch
 git diff --check
 ```
 
