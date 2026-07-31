@@ -33,7 +33,7 @@ export function AccountPicker({ accounts, loading, importError, onSelect, isDark
 
       <main className="account-picker-content">
         <div className="brand-lockup">
-          <img className="brand-icon" src="/app-icon.png?v=3.0.0" alt="" />
+          <img className="brand-icon" src="/app-icon.png?v=3.1.0" alt="" />
           <div className="brand-name" style={{ color: theme.text }}>Chat Vault</div>
           <div className="brand-tagline" style={{ color: theme.textSub }}>{t("account.selectAccountDesc")}</div>
         </div>

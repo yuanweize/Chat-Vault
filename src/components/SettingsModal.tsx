@@ -276,7 +276,7 @@ export function SettingsModal({ onClose, accountId, initialSettings, onSaved }: 
                   <img src="/app-icon.png" width={84} height={84} alt="" style={{ borderRadius: 22, filter: "drop-shadow(0 14px 24px rgba(38,48,110,.2))" }} />
                   <h3 style={{ margin: "18px 0 4px", color: theme.text, fontSize: 23, letterSpacing: "-.03em" }}>Chat Vault</h3>
                   <p style={{ margin: 0, color: theme.textSub, fontSize: 13 }}>{t("settings.aboutTagline")}</p>
-                  <div style={{ marginTop: 20, color: theme.textMuted, fontSize: 12 }}>{t("settings.version", { version: "3.0.0" })}</div>
+                  <div style={{ marginTop: 20, color: theme.textMuted, fontSize: 12 }}>{t("settings.version", { version: "3.1.0" })}</div>
                   <div style={{ marginTop: 5, maxWidth: 430, color: theme.textMuted, fontSize: 11.5, lineHeight: 1.5 }}>{t("settings.basedOn")}</div>
                 </div>
               )}
